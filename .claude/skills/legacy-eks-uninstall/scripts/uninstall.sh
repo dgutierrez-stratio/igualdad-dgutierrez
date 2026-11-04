@@ -9,9 +9,13 @@
 #   uninstall.sh apply --dir DIR --confirm-cluster NOMBRE --confirm-account CUENTA [--max-passes 4] [--pass-timeout 1200] [--wait 90] [--accept-new]
 #                                                     # ejecuta el plan en pasadas (finder -> filtro -> remover) hasta dejar la cuenta limpia; termina con verify
 #   uninstall.sh verify --dir DIR                     # solo lectura: ¿queda algo del clúster? ¿sigue intacto el acceso a la cuenta?
+#   uninstall.sh local-plan  --dir DIR [--root DIR]   # LOCAL, no borra: contenedores docker, directorio efímero de apps-layer y ficheros generados
+#   uninstall.sh local-apply --dir DIR [--root DIR] --confirm-cluster N --confirm-account A [--backup-dir D] [--no-backup] [--accept-partial-backup]
+#                                                     # hace BACKUP (.tar.gz 600) y borra lo del plan local. Exige que AWS ya esté limpio
 #
-# Qué NO hace: no toca el clúster (ni kubectl ni helm), no crea ni modifica nada en AWS (los borrados los hace SOLO el remover; `awsx` aquí
-# bloquea cualquier operación que no sea de lectura), no toca ~/.aws, /etc/hosts, git ni el workspace local.
+# Qué NO hace: no toca el clúster (ni kubectl ni helm) ni escribe en AWS (los borrados de AWS los hace SOLO el remover; `awsx` aquí bloquea
+# cualquier operación que no sea de lectura). La fase local solo toca contenedores docker del clúster, /tmp/apps-layer-<C> y los ficheros
+# generados listados; NUNCA ~/.aws, /etc/hosts (no usa sudo: imprime el comando), git, cluster.env ni logs/.
 # Ficheros (sin secretos) en <DIR>/uninstall/: identity.json context.json finder-full.json clean.json report.json planned.lst plan.sha256 baseline/ logs/
 # Variables: MARKETPLACE_TOOLKIT FINDER_PY REMOVER_PY MARKETPLACE_PYTHON; SKIP_HANDLER_CHECK=1 (solo pruebas/bajo tu responsabilidad);
 # UNINSTALL_PROTECTED_IDS / UNINSTALL_PROTECTED_NAMES (en cluster.env, separados por espacios): ids/nombres IAM extra que NUNCA se borran.
@@ -19,13 +23,15 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 FILTER="$LIB_DIR/filter-resources.sh"
 
-cmd="${1:-}"; [[ -n "$cmd" ]] || { sed -n '2,15p' "$0"; exit 2; }; shift || true
+cmd="${1:-}"; [[ -n "$cmd" ]] || { sed -n '2,22p' "$0"; exit 2; }; shift || true
 DIR=""; KEEP_SHARED=false; INCLUDE_UNOWNED=false; CONF_CLUSTER=""; CONF_ACCOUNT=""; MAX_PASSES=4; PASS_TIMEOUT=1200; WAIT=90; ACCEPT_NEW=false
+ROOT=""; BACKUP_DIR="${UNINSTALL_BACKUP_DIR:-$HOME/backups}"; NO_BACKUP=false; ACCEPT_PARTIAL=false
 while [[ $# -gt 0 ]]; do case "$1" in
   --dir) DIR="$2"; shift 2 ;; --keep-shared) KEEP_SHARED=true; shift ;; --include-unowned) INCLUDE_UNOWNED=true; shift ;;
   --confirm-cluster) CONF_CLUSTER="$2"; shift 2 ;; --confirm-account) CONF_ACCOUNT="$2"; shift 2 ;;
   --max-passes) MAX_PASSES="$2"; shift 2 ;; --pass-timeout) PASS_TIMEOUT="$2"; shift 2 ;; --wait) WAIT="$2"; shift 2 ;; --accept-new) ACCEPT_NEW=true; shift ;;
-  -h|--help) sed -n '2,15p' "$0"; exit 0 ;; *) die "opción desconocida: $1" ;; esac; done
+  --root) ROOT="$2"; shift 2 ;; --backup-dir) BACKUP_DIR="$2"; shift 2 ;; --no-backup) NO_BACKUP=true; shift ;; --accept-partial-backup) ACCEPT_PARTIAL=true; shift ;;
+  -h|--help) sed -n '2,22p' "$0"; exit 0 ;; *) die "opción desconocida: $1" ;; esac; done
 need_tools jq
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -252,7 +258,190 @@ do_verify() {
   return $rc
 }
 
+# ---------------------------------------------------------------------------------------------------------------------
+# FASE LOCAL: contenedores docker, directorio efímero de apps-layer y ficheros generados del workspace
+# ---------------------------------------------------------------------------------------------------------------------
+# Patrones relativos al directorio del clúster (y, con --root, a la raíz del workspace). SECRETO = se hace backup y se destruye con shred;
+# GENERADO = regenerable (se incluye en el backup salvo requirements/ y .work/, que pesan y se rehacen). Se CONSERVAN siempre: cluster.env, logs/, templates/, uninstall/.
+SECRET_PATTERNS=(secrets.yml cluster.yaml 'kubeconfig-*' admin.key admin.cert pki .kube .config .keos_bash_history)
+GEN_PATTERNS=(keos.yaml keos.yaml.cloud-provisioner override_vars override_charts_values apps backup 'data_psql.*.yaml' ldap_user.template '*-tenant.yaml' '*_group.json' '*-users_role.json' estado .work requirements)
+NOBACKUP_PATTERNS=(requirements .work)
+KEEP_NAMES=(cluster.env logs templates uninstall)
+EXPECTED_IMG_RE='(cloud-provisioner|keos-installer|apps-layer-automation)'
+
+dk() {  # docker; en planes solo lectura
+  local v="${1:-}"
+  if [[ "${LOCAL_MODE:-plan}" != apply && ! "$v" =~ ^(ps|inspect|info|version|image|images)$ ]]; then die "BUG: docker '$v' en un plan (solo lectura)"; fi
+  docker "$@"
+}
+list_matches() {  # list_matches BASE KIND(secret|gen) -> rutas relativas existentes
+  local base="$1" kind="$2" pat f; local -a pats
+  if [[ "$kind" == secret ]]; then pats=("${SECRET_PATTERNS[@]}"); else pats=("${GEN_PATTERNS[@]}" "$C.json"); fi
+  ( cd "$base" && shopt -s nullglob dotglob && for pat in "${pats[@]}"; do for f in $pat; do if [[ -e "$f" || -L "$f" ]]; then echo "$f"; fi; done; done | sort -u )
+}
+is_kept() { local n="$1" k; for k in "${KEEP_NAMES[@]}"; do [[ "$n" == "$k" ]] && return 0; done; return 1; }
+owner_of() { stat -c '%U' "$1" 2>/dev/null || echo "?"; }
+
+local_docker_candidates() {  # -> líneas "ID|nombre|imagen|estado|motivo"
+  command -v docker >/dev/null 2>&1 || return 0
+  docker info >/dev/null 2>&1 || { warn "docker no responde: no se pueden revisar los contenedores"; return 0; }
+  local id name img st mounts why
+  for id in $(dk ps -a --format '{{.ID}}'); do
+    name="$(dk inspect -f '{{.Name}}' "$id" | sed 's#^/##')"; img="$(dk inspect -f '{{.Config.Image}}' "$id")"
+    [[ "$img" =~ $EXPECTED_IMG_RE ]] || continue
+    st="$(dk inspect -f '{{.State.Status}}' "$id")"; mounts="$(dk inspect -f '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' "$id")"; why=""
+    case "$name" in "${C}-control-plane") why="kind retenido de cloud-provisioner" ;; "keos-installer_${C}") why="contenedor de apps-layer" ;; "apps-layer-${C}") why="contenedor de apps-layer" ;; esac
+    if [[ -z "$why" ]]; then
+      local m; while IFS= read -r m; do [[ -n "$m" ]] || continue
+        if [[ "$m" == "$DIR" || "$m" == "${ROOT:-__nada__}" || "$m" == "${TMPDIR:-/tmp}/apps-layer-$C" ]]; then why="monta el workspace del clúster ($m)"; break; fi
+      done <<<"$mounts"
+    fi
+    if [[ -n "$why" ]]; then echo "$id|$name|$img|$st|$why"; fi
+  done
+}
+
+cluster_gone_check() {  # la fase local solo corre si AWS ya está limpio (si no, se perderían kubeconfig/secretos aún necesarios)
+  local j; j="$(eks_json)"; has_cluster "$j" && die "el EKS $C sigue existiendo: ejecuta antes 'apply' (borrado en AWS). La fase local destruye kubeconfig y secretos que aún harían falta."
+  local left; [[ -f "$U/clean-after.json" ]] && left="$(jq '[.[]|length]|add // 0' "$U/clean-after.json")" || left=""
+  [[ "$left" == "0" ]] || die "no consta una verificación limpia (falta $U/clean-after.json o tiene recursos): ejecuta 'uninstall.sh verify --dir $DIR' y que salga OK antes de limpiar lo local"
+  local vpc; vpc="$(jq -r '.cluster_vpc // ""' "$U/identity.json" 2>/dev/null || true)"
+  if [[ -n "$vpc" && "$(awsx ec2 describe-vpcs --vpc-ids "$vpc" --query 'length(Vpcs)' --output text 2>/dev/null || echo 0)" != 0 ]]; then die "la VPC $vpc del clúster aún existe en AWS"; fi
+  [[ "$(awsx route53 list-hosted-zones --query "length(HostedZones[?contains(Name, '${EXTERNAL_DOMAIN:-__nada__}')])" --output text)" == 0 ]] || die "aún hay zonas Route53 de ${EXTERNAL_DOMAIN}"
+}
+
+local_collect() {  # rellena L_ITEMS (tipo|ruta-absoluta|grupo|dueño|tamaño), L_KEPT, L_UNKNOWN y L_DOCKER
+  L_ITEMS=(); L_KEPT=(); L_UNKNOWN=(); L_DOCKER=()
+  local base rel kind abs
+  local -a bases=("$DIR"); [[ -n "$ROOT" ]] && bases+=("$ROOT")
+  for base in "${bases[@]}"; do
+    for kind in secret gen; do
+      while IFS= read -r rel; do [[ -n "$rel" ]] || continue; is_kept "$rel" && continue; abs="$base/$rel"
+      # los Secret_* del backup de objetos van como SECRETO (shred) aunque backup/ sea "generado"
+        L_ITEMS+=("$kind|$abs|$(owner_of "$abs")|$(du -sh "$abs" 2>/dev/null | cut -f1 || true)")
+      done < <(list_matches "$base" "$kind")
+    done
+    L_KEPT+=("$base: $(cd "$base" && shopt -s nullglob dotglob && for f in cluster.env logs templates uninstall; do if [[ -e $f ]]; then printf '%s ' "$f"; fi; done)")
+  done
+  while IFS= read -r l; do [[ -n "$l" ]] && L_DOCKER+=("$l"); done < <(local_docker_candidates)
+  # la raíz del workspace: si es un repo git, los ficheros versionados que se van a borrar deben estar limpios y subidos
+  if [[ -n "$ROOT" && -d "$ROOT/.git" ]]; then
+    local it p
+    for it in "${L_ITEMS[@]}"; do p="${it#*|}"; p="${p%%|*}"; [[ "$p" == "$ROOT"/* ]] || continue
+      git -C "$ROOT" ls-files --error-unmatch -- "${p#"$ROOT"/}" >/dev/null 2>&1 || git -C "$ROOT" ls-files -- "${p#"$ROOT"/}" | grep -q . || continue
+      git -C "$ROOT" diff --quiet -- "${p#"$ROOT"/}" && git -C "$ROOT" diff --cached --quiet -- "${p#"$ROOT"/}" || die "${p#"$ROOT"/} está versionado y tiene cambios sin commit: haz commit/push antes de borrarlo"
+    done
+  fi
+}
+
+do_local_plan() {
+  setup_dir; LOCAL_MODE=plan; [[ -z "$ROOT" ]] || ROOT="$(cd "$ROOT" && pwd)"
+  cluster_gone_check; local_collect
+  echo; echo "== Plan LOCAL para $C (no borra nada) =="
+  echo "-- contenedores docker del clúster (se borran con docker rm -f):"
+  local d id name img st why
+  if [[ ${#L_DOCKER[@]} -eq 0 ]]; then echo "   (ninguno)"; else for d in "${L_DOCKER[@]}"; do IFS='|' read -r id name img st why <<<"$d"; printf '   %s  %s  [%s]  %s\n' "$id" "$name" "$st" "$why"; done; fi
+  local eph="${TMPDIR:-/tmp}/apps-layer-$C"
+  echo "-- directorio efímero de apps-layer: $([[ -d "$eph" ]] && echo "$eph (se destruye con shred)" || echo '(no existe)')"
+  echo "-- ficheros (secret = backup + shred; gen = regenerable, va al backup salvo requirements/ y .work/):"
+  local it k p o sz
+  if [[ ${#L_ITEMS[@]} -eq 0 ]]; then echo "   (ninguno)"; else for it in "${L_ITEMS[@]}"; do IFS='|' read -r k p o sz <<<"$it"; printf '   %-6s %-8s %6s  %s\n' "$k" "$o" "$sz" "$p"; done; fi
+  echo "-- se CONSERVAN: ${L_KEPT[*]:-}"
+  local f unk=""
+  for f in $(cd "$DIR" && shopt -s nullglob dotglob && printf '%s\n' *); do
+    is_kept "$f" && continue; printf '%s\n' "${L_ITEMS[@]:-}" | grep -qF "|$DIR/$f|" || unk+="   $DIR/$f"$'\n'
+  done
+  [[ -z "$unk" ]] || { echo "-- no reconocidos (se CONSERVAN, revísalos tú):"; printf '%s' "$unk"; }
+  local ro=0; for it in "${L_ITEMS[@]:-}"; do [[ -n "$it" ]] || continue; IFS='|' read -r k p o sz <<<"$it"; [[ "$o" == root ]] && ro=1; done
+  [[ $ro -eq 0 ]] || echo "-- hay ficheros de root: se leerán/borrarán con un contenedor auxiliar (imagen ${KEOS_INSTALLER_IMAGE:-keos-installer}); sin él habría que usar sudo"
+  [[ "$NO_BACKUP" == true ]] && warn "--no-backup: NO se hará copia de seguridad" || echo "-- backup: $BACKUP_DIR/${C}-workspace-<fecha>.tar.gz (600; sin requirements/ ni .work/)"
+  { printf '%s\n' "${L_ITEMS[@]:-}" | cut -d'|' -f1,2; printf '%s\n' "${L_DOCKER[@]:-}" | cut -d'|' -f2 | sed 's/^/docker|/'; } | { grep -v '^$' || true; } | sort > "$U/local-planned.lst"
+  echo; echo "SIGUIENTE: confirmar con la persona usuaria y lanzar: uninstall.sh local-apply --dir $DIR${ROOT:+ --root $ROOT} --confirm-cluster $C --confirm-account $ACCT"
+  print_outside
+}
+
+print_outside() {
+  echo; echo "== Fuera del alcance de esta skill (no usa sudo ni toca ~/.aws, /etc/hosts o git) =="
+  if grep -q "${EXTERNAL_DOMAIN:-__nada__}" /etc/hosts 2>/dev/null; then echo "  /etc/hosts tiene entradas de $EXTERNAL_DOMAIN. Para quitarlas:   sudo sed -i '/${EXTERNAL_DOMAIN//./\\.}/d' /etc/hosts"; else echo "  /etc/hosts: sin entradas de $EXTERNAL_DOMAIN"; fi
+  echo "  ~/.aws: el perfil '${CP_PROFILE:-cloud-provisioner}' tiene una clave que ya no existe; el paso 1 de la instalación lo regenera (no hace falta tocarlo)."
+  echo "  Git: el estado GitOps del clúster (clusters/$C en flux-stratio/keos-fleet) y el repo de este workspace no se tocan."
+}
+
+rm_path() {  # rm_path RUTA [secret] -> borra; si falla por permisos usa el contenedor auxiliar (root) y, si no, lo anota en NEED_SUDO
+  local p="$1" kind="${2:-gen}" parent name img
+  [[ -e "$p" || -L "$p" ]] || return 0
+  [[ "$p" != "/" && "$p" != "$HOME" && "$p" == /* && ${#p} -gt 8 ]] || die "ruta no segura: $p"
+  if [[ "$kind" == secret || -d "$p" ]]; then
+    find "$p" -type f \( -name 'Secret_*' -o -name '*.key' -o -name 'secrets.yml' -o -name 'kubeconfig*' -o -name 'ca.password' -o -name 'cluster.yaml' \) -writable -exec shred -u {} + 2>/dev/null || true
+  fi
+  [[ "$kind" == secret && -f "$p" && -w "$p" ]] && { shred -u "$p" 2>/dev/null || rm -f "$p"; }
+  [[ -e "$p" || -L "$p" ]] && { chmod -R u+rwX "$p" 2>/dev/null || true; rm -rf "$p" 2>/dev/null || true; }
+  if [[ -e "$p" || -L "$p" ]]; then
+    img="${KEOS_INSTALLER_IMAGE:-}"; parent="$(dirname "$p")"; name="$(basename "$p")"
+    if [[ -n "$img" ]] && dk image inspect "$img" >/dev/null 2>&1 && dk run --rm -v "$parent":/w --entrypoint sh "$img" -c 'rm -rf -- "/w/$1"' sh "$name" >/dev/null 2>&1; then :; fi
+  fi
+  if [[ -e "$p" || -L "$p" ]]; then NEED_SUDO+=("$p"); komsg "no se pudo borrar $p"; else okmsg "borrado $p"; fi
+}
+
+make_backup() {  # -> ARCHIVE (entradas relativas a /: restaurar con `tar -xzf FICHERO -C /`)
+  local ts; ts="$(date +%Y%m%d-%H%M%S)"; mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"
+  ARCHIVE="$BACKUP_DIR/${C}-workspace-$ts.tar.gz"
+  local it k p o sz nb pat unreadable=0 rootown=0 img="${KEOS_INSTALLER_IMAGE:-}" helper=false
+  [[ -n "$img" ]] && dk image inspect "$img" >/dev/null 2>&1 && helper=true
+  local -a args=() rels=()
+  for it in "${L_ITEMS[@]:-}"; do [[ -n "$it" ]] || continue; IFS='|' read -r k p o sz <<<"$it"; nb=false
+    for pat in "${NOBACKUP_PATTERNS[@]}"; do [[ "$(basename "$p")" == "$pat" ]] && nb=true; done; $nb && continue
+    args+=("$p"); rels+=("${p#/}"); [[ "$o" == root ]] && rootown=1
+    [[ -n "$(find "$p" ! -readable -print -quit 2>/dev/null)" ]] && unreadable=1
+  done
+  [[ ${#args[@]} -gt 0 ]] || { info "nada que archivar"; ARCHIVE=""; return 0; }
+  if [[ $unreadable -eq 1 ]]; then
+    if $helper; then
+      # un contenedor (root, mismas rutas montadas en solo lectura) lee todo y deja el .tar.gz a nombre del usuario con permisos 600
+      local -a mounts=(); local seen=" " bdir
+      for p in "${args[@]}"; do bdir="$(dirname "$p")"; [[ "$seen" == *" $bdir "* ]] || { seen+="$bdir "; mounts+=(-v "$bdir:$bdir:ro"); }; done
+      dk run --rm "${mounts[@]}" -v "$BACKUP_DIR":/out --entrypoint sh "$img" -c 'a="$1"; ug="$2"; shift 2; tar -czf "/out/$a" -C / "$@" 2>/dev/null; rc=$?; chown "$ug" "/out/$a"; chmod 600 "/out/$a"; exit $rc' sh "$(basename "$ARCHIVE")" "$(id -u):$(id -g)" "${rels[@]}" >/dev/null 2>&1 || true
+      [[ -s "$ARCHIVE" ]] || die "el backup con el contenedor auxiliar falló: no se borra nada"
+    else
+      [[ "$ACCEPT_PARTIAL" == true ]] || die "hay ficheros que este usuario no puede leer y no hay imagen auxiliar local ($img): descárgala, o usa --accept-partial-backup (copia parcial) o --no-backup"
+      warn "backup PARCIAL: faltarán los ficheros ilegibles"
+    fi
+  fi
+  if [[ ! -s "$ARCHIVE" ]]; then
+    tar -czf "$ARCHIVE" --ignore-failed-read -C / "${rels[@]}" 2>/dev/null || true; chmod 600 "$ARCHIVE" 2>/dev/null || true
+  fi
+  [[ -s "$ARCHIVE" ]] || die "no se pudo crear el backup $ARCHIVE: no se borra nada"
+  local n; n="$(tar -tzf "$ARCHIVE" 2>/dev/null | wc -l)"; [[ "$n" -gt 0 ]] || die "el backup $ARCHIVE está vacío o corrupto: no se borra nada"
+  okmsg "backup: $ARCHIVE ($n entradas, $(du -h "$ARCHIVE" | cut -f1), sha256 $(sha256sum "$ARCHIVE" | cut -c1-12)…, permisos $(stat -c %a "$ARCHIVE"))"
+}
+
+do_local_apply() {
+  setup_dir; LOCAL_MODE=apply; [[ -z "$ROOT" ]] || ROOT="$(cd "$ROOT" && pwd)"
+  [[ "$CONF_CLUSTER" == "$C" ]]    || die "--confirm-cluster debe ser exactamente '$C'"
+  [[ "$CONF_ACCOUNT" == "$ACCT" ]] || die "--confirm-account debe ser exactamente '$ACCT'"
+  [[ -f "$U/local-planned.lst" ]] || die "no hay plan local: ejecuta antes 'uninstall.sh local-plan --dir $DIR'"
+  cluster_gone_check; local_collect
+  local now; now="$( { printf '%s\n' "${L_ITEMS[@]:-}" | cut -d'|' -f1,2; printf '%s\n' "${L_DOCKER[@]:-}" | cut -d'|' -f2 | sed 's/^/docker|/'; } | { grep -v '^$' || true; } | sort )"
+  local fresh; fresh="$(comm -13 "$U/local-planned.lst" <(echo "$now") || true)"
+  [[ -z "$fresh" ]] || die "han aparecido elementos que NO estaban en el plan local revisado (no se borra nada):"$'\n'"$fresh"$'\n'"Revisa y relanza 'local-plan'."
+  NEED_SUDO=(); ARCHIVE=""
+  if [[ "$NO_BACKUP" == true ]]; then warn "sin backup (--no-backup)"; else make_backup; fi
+  local d id name img st why
+  for d in "${L_DOCKER[@]:-}"; do [[ -n "$d" ]] || continue; IFS='|' read -r id name img st why <<<"$d"
+    if dk rm -f "$id" >/dev/null 2>&1; then okmsg "contenedor $name ($id) borrado"; else komsg "no se pudo borrar el contenedor $name ($id)"; fi
+  done
+  local eph="${TMPDIR:-/tmp}/apps-layer-$C"
+  if [[ -d "$eph" && ! -L "$eph" && "$(owner_of "$eph")" == "$(id -un)" ]]; then find "$eph" -type f -exec shred -u {} + 2>/dev/null || true; rm_path "$eph" secret
+  elif [[ -e "$eph" ]]; then warn "$eph existe pero no es un directorio propio normal: no se toca"; fi
+  local it k p o sz
+  for it in "${L_ITEMS[@]:-}"; do [[ -n "$it" ]] || continue; IFS='|' read -r k p o sz <<<"$it"; rm_path "$p" "$k"; done
+  echo; echo "== Resultado local =="
+  [[ -z "$ARCHIVE" ]] || echo "backup: $ARCHIVE"
+  if [[ ${#NEED_SUDO[@]} -gt 0 ]]; then komsg "quedan ${#NEED_SUDO[@]} rutas que requieren sudo (la skill no lo usa):"; printf '   sudo rm -rf %q\n' "${NEED_SUDO[@]}"; return 2; fi
+  okmsg "workspace local limpio: se conservan cluster.env, logs/, templates/ y uninstall/"
+  print_outside
+}
+
 case "$cmd" in
-  identify) do_identify ;; plan) do_plan ;; apply) do_apply ;; verify) do_verify ;;
-  *) die "subcomando desconocido: $cmd (identify|plan|apply|verify)" ;;
+  identify) do_identify ;; plan) do_plan ;; apply) do_apply ;; verify) do_verify ;; local-plan) do_local_plan ;; local-apply) do_local_apply ;;
+  *) die "subcomando desconocido: $cmd (identify|plan|apply|verify|local-plan|local-apply)" ;;
 esac

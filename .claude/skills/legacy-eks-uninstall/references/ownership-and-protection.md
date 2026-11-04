@@ -36,3 +36,17 @@ El finder lista **todo** lo que hay en la cuenta/región y el remover borra **to
 2. `_delete_subnet` y `_delete_ec2_network_interface` reintentan cada 30 s **sin límite**: si algo retiene una ENI (por ejemplo la de EKS mientras el cluster existe) el proceso no termina; el `timeout` por pasada es la red de seguridad.
 3. El finder no lista **instance profiles** (`verify` las señala si quedan).
 4. Solo opera en una región (la del `cluster.env`); `context` avisa de EKS en otras.
+
+## Fase local (local-plan / local-apply)
+
+| Qué | Regla |
+|---|---|
+| Precondición | EKS, VPC del clúster y zonas Route53 del dominio ya no existen y `uninstall/clean-after.json` (de `verify`) está vacío. Si no, se niega: kubeconfig y secretos aún harían falta para un teardown manual |
+| Contenedores | por nombre exacto (`<C>-control-plane`, `keos-installer_<C>`, `apps-layer-<C>`) o por bind-mount del directorio del clúster / `--root` / `/tmp/apps-layer-<C>`; **solo** imágenes `cloud-provisioner`, `keos-installer`, `apps-layer-automation`. Cualquier otro contenedor (incluidos los keos-installer de otros trabajos) se ignora |
+| Secretos | `secrets.yml cluster.yaml kubeconfig-* admin.key admin.cert pki .kube .config .keos_bash_history`: backup + `shred` (también `Secret_*`, `*.key`, `kubeconfig*`, `cluster.yaml`, `ca.password` dentro de directorios) |
+| Regenerables | `keos.yaml keos.yaml.cloud-provisioner override_vars override_charts_values apps backup data_psql.*.yaml ldap_user.template *-tenant.yaml *_group.json *-users_role.json estado .work requirements <C>.json`; van al backup salvo `requirements/` y `.work/` (pesan y se rehacen) |
+| Se conserva siempre | `cluster.env`, `logs/`, `templates/`, `uninstall/` y todo lo que no esté en las listas (se informa como "no reconocido") |
+| `--root` | misma lista sobre la raíz del workspace; nunca `.claude/`, `docs/`, README ni scripts. Si es un repo git, un fichero versionado con cambios sin commit **aborta** (haz commit/push antes) |
+| Ficheros de `root` | los crea el contenedor keos-installer. Se leen (backup) y se borran con un contenedor auxiliar con la imagen local (`KEOS_INSTALLER_IMAGE`, root, rutas montadas), sin `sudo`. Sin imagen: el backup aborta (o `--accept-partial-backup`) y los borrados pendientes se imprimen como `sudo rm -rf` |
+| Backup | `<backup-dir>/<C>-workspace-<fecha>.tar.gz` (por defecto `~/backups`, 700; archivo 600), se comprueba que no está vacío antes de borrar; restaurar con `tar -xzf <fichero> -C /` |
+| Plan fijado | `local-apply` aborta si aparece algo que no estaba en `local-plan` |

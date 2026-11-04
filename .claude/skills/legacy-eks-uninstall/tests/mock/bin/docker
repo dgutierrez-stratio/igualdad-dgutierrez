@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# docker FALSO para pruebas offline. Contenedores en $MOCK_STATE/containers.tsv (id|nombre|imagen|estado|mounts separados por coma). Registra en $MOCK_LOG.
+echo "docker $*" >> "${MOCK_LOG:-/dev/null}"
+TSV="$MOCK_STATE/containers.tsv"; touch "$TSV"
+case "${1:-}" in
+ info) exit 0 ;;
+ ps) cut -d'|' -f1 "$TSV" ;;
+ inspect) fmt="$3"; id="$4"; row="$(grep "^$id|" "$TSV")"; [[ -n "$row" ]] || exit 1
+    case "$fmt" in
+      '{{.Name}}') echo "/$(cut -d'|' -f2 <<<"$row")" ;;
+      '{{.Config.Image}}') cut -d'|' -f3 <<<"$row" ;;
+      '{{.State.Status}}') cut -d'|' -f4 <<<"$row" ;;
+      *Mounts*) cut -d'|' -f5 <<<"$row" | tr ',' '\n' ;;
+    esac ;;
+ image) [[ -z "${MOCK_NO_IMAGE:-}" ]] && exit 0 || exit 1 ;;
+ rm) id="${@: -1}"; grep -v "^$id|" "$TSV" > "$TSV.n"; mv "$TSV.n" "$TSV" ;;
+ run)  # ayudante root: (a) borrar `sh -c '... rm -rf ...' sh NOMBRE` con -v PADRE:/w; (b) tar de backup con -v BDIR:BDIR:ro -v DEST:/out
+    args=("$@"); parent=""; out=""; for ((i=0;i<${#args[@]};i++)); do
+      [[ "${args[i]}" == "-v" ]] && { m="${args[i+1]}"; case "$m" in *:/w) parent="${m%%:*}" ;; *:/out) out="${m%%:*}" ;; esac; }; done
+    if [[ -n "$out" ]]; then   # backup: sh -c SCRIPT sh ARCHIVO UID:GID rels...
+      for ((i=0;i<${#args[@]};i++)); do [[ "${args[i]}" == "sh" && "${args[i-1]}" != "--entrypoint" ]] && { idx=$i; break; }; done
+      arch="${args[idx+1]}"; rels=("${args[@]:idx+3}"); ( cd / && for r in "${rels[@]}"; do chmod -R u+r "$r" 2>/dev/null; done; tar -czf "$out/$arch" "${rels[@]}" ) ; chmod 600 "$out/$arch"
+    else name="${args[-1]}"; chmod -R u+rwX "$parent/$name" 2>/dev/null; /bin/rm -rf "$parent/$name"; fi ;;
+ *) echo "mock docker: no previsto: $*" >&2; exit 99 ;;
+esac

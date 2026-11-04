@@ -50,6 +50,7 @@ export AWS_REGION=eu-west-1
 export ADMIN_PROFILE=igualdad
 export CP_PROFILE=cloud-provisioner-111111111111
 export EXTERNAL_DOMAIN=demo-x.desa.int
+export KEOS_INSTALLER_IMAGE=qa.int.stratio.com/stratio/keos-installer:1.4.2
 E
 D="$W/clusters/demo-x"; export MOCK_LOG="$T/mock.log" MOCK_STATE="$T/state"; mkdir -p "$MOCK_STATE"; : > "$MOCK_LOG"
 out="$("$S/uninstall.sh" identify 2>&1)"; grep -q 'CANDIDATO.*cluster=demo-x.*account=111111111111' <<<"$out" && pass "identify lista el clúster instalado" || fail "identify sin candidato: $out"
@@ -103,5 +104,62 @@ echo "== 4. EKS ya borrado =="
 touch "$MOCK_STATE/eks_gone"; rm -f "$D/uninstall/identity.json"
 out="$("$S/uninstall.sh" identify --dir "$D" 2>&1)"; grep -q 'eks=NO_EXISTE' <<<"$out" && pass "identify con el EKS ya borrado: eks=NO_EXISTE (no lo da por existente)" || fail "identify con EKS borrado: $out"
 [[ ! -f "$D/uninstall/identity.json" ]] && pass "no se escribe identity.json sin EKS" || fail "identity.json escrito sin EKS"
+
+echo "== 5. fase LOCAL (docker, directorio efímero y ficheros) =="
+rm -rf "$MOCK_STATE" "$D/uninstall"; mkdir -p "$MOCK_STATE"; : > "$MOCK_LOG"
+# workspace ficticio: raíz = $W (repo git), clúster = $D
+cd "$W" && git init -q -b main . && git config user.email t@t && git config user.name t
+mkdir -p "$W/.claude" "$W/docs"; echo skill > "$W/.claude/s.md"; echo doc > "$W/docs/d.md"; echo "gen: raiz" > "$W/keos.yaml"; echo readme > "$W/README.md"; echo KEEP=1 > "$W/cluster.env"
+git add -A && git commit -qm base
+cd "$D"; mkdir -p logs templates pki .config .kube apps/a backup/objects backup/manifests override_vars requirements/lib .work "$T/eph"
+echo s > secrets.yml; echo c > cluster.yaml; echo k > kubeconfig-demo-x; echo k > admin.key; echo c > admin.cert; echo ca > pki/ca.key; chmod 000 pki/ca.key
+echo y > keos.yaml; echo y > override_vars/o.yaml; echo j > apps/a/x.json; echo m > backup/manifests/m.yaml; echo S > backup/objects/Secret_x_kubeconfig.yaml; echo v > demo-x.json
+echo big > requirements/lib/big.bin; echo w > .work/w; echo L > logs/l.log; echo T > templates/t.tpl; echo notas > notes.txt; echo r > .config/rootowned
+export TMPDIR="$T/tmpdir"; mkdir -p "$TMPDIR/apps-layer-demo-x"; echo "S3_KEY=xx" > "$TMPDIR/apps-layer-demo-x/.env"
+printf '%s\n' "a1|demo-x-control-plane|cloud-provisioner:0.9.8|running|/var/run/docker.sock" "a2|keos-installer_demo-x|qa.int.stratio.com/stratio/keos-installer:1.4.2|exited|$D" \
+  "a3|epic_swanson|qa.int.stratio.com/stratio/keos-installer:1.4.2|exited|$D,/var/run/docker.sock" "a4|otro_trabajo|qa.int.stratio.com/stratio/keos-installer:1.4.3|exited|/home/x/otro" \
+  "a5|demo-x-control-plane2|nginx:latest|running|$D" > "$MOCK_STATE/containers.tsv"
+LP="$S/uninstall.sh local-plan --dir $D --root $W"; LA="$S/uninstall.sh local-apply --dir $D --root $W --confirm-cluster demo-x --confirm-account 111111111111 --backup-dir $T/bk"
+$S/uninstall.sh local-plan --dir "$D" >/dev/null 2>&1 && fail "local-plan con el EKS aún vivo" || pass "local-plan se niega si el EKS sigue existiendo"
+"$S/uninstall.sh" plan --dir "$D" >/dev/null 2>&1; "$S/uninstall.sh" apply --dir "$D" --confirm-cluster demo-x --confirm-account 111111111111 --wait 0 >/dev/null 2>&1
+$S/uninstall.sh local-apply --dir "$D" --confirm-cluster demo-x --confirm-account 111111111111 >/dev/null 2>&1 && fail "local-apply sin plan" || pass "local-apply exige local-plan previo"
+out="$($LP 2>&1)"; rc=$?; echo "$out" > "$T/localplan.out"
+[[ $rc -eq 0 ]] && pass "local-plan termina bien (AWS limpio)" || { fail "local-plan rc=$rc"; tail -8 "$T/localplan.out"; }
+for n in demo-x-control-plane keos-installer_demo-x epic_swanson; do grep -q "$n" <<<"$out" && pass "plan lista el contenedor $n" || fail "plan no lista $n"; done
+grep -q 'otro_trabajo' <<<"$out" && fail "plan incluye un contenedor ajeno" || pass "plan ignora el contenedor ajeno (otro_trabajo)"
+grep -q 'demo-x-control-plane2' <<<"$out" && fail "plan incluye contenedor con imagen no esperada" || pass "plan ignora imágenes no esperadas (nginx)"
+for f in secrets.yml cluster.yaml kubeconfig-demo-x admin.key pki apps backup requirements demo-x.json keos.yaml; do grep -q "$D/$f" <<<"$out" && pass "plan lista $f" || fail "plan no lista $f"; done
+grep -q "$W/keos.yaml" <<<"$out" && pass "con --root lista también keos.yaml de la raíz" || fail "no lista keos.yaml de la raíz"
+grep -q "$W/README.md\|\.claude\|$W/docs" <<<"$out" && fail "plan toca README/.claude/docs de la raíz" || pass "README, .claude y docs de la raíz NO están en el plan"
+grep -q 'no reconocidos' <<<"$out" && grep -q 'notes.txt' <<<"$out" && pass "notes.txt se informa como no reconocido (se conserva)" || fail "no reconocido no informado"
+grep -qE '/etc/hosts' <<<"$out" && pass "informa de lo que queda fuera (hosts/aws/git)" || fail "falta el apartado fuera de alcance"
+[[ -z "$(grep -E '^docker (rm|run)' "$MOCK_LOG")" && -f "$D/secrets.yml" ]] && pass "local-plan no borra ni ejecuta nada" || fail "local-plan modificó algo"
+$S/uninstall.sh local-apply --dir "$D" --root "$W" --confirm-cluster otro --confirm-account 111111111111 >/dev/null 2>&1 && fail "local-apply acepta clúster erróneo" || pass "local-apply rechaza --confirm-cluster erróneo"
+touch "$D/override_charts_values"; $LA >/dev/null 2>&1 && fail "local-apply acepta elementos nuevos" || pass "local-apply aborta si aparecen elementos no revisados"
+rm -f "$D/override_charts_values"
+echo "cambio" >> "$W/keos.yaml"; $LP >/dev/null 2>&1 && fail "acepta fichero versionado con cambios" || pass "rechaza borrar un fichero versionado con cambios sin commit"
+(cd "$W" && git checkout -q keos.yaml); $LP >/dev/null 2>&1
+$LA > "$T/localapply.out" 2>&1; rc=$?
+[[ $rc -eq 0 ]] && pass "local-apply termina con rc=0" || { fail "local-apply rc=$rc"; tail -12 "$T/localapply.out"; }
+BK="$(ls "$T"/bk/demo-x-workspace-*.tar.gz 2>/dev/null | head -1)"
+[[ -n "$BK" && "$(stat -c %a "$BK")" == 600 ]] && pass "backup creado con permisos 600" || fail "backup ausente o permisos"
+lst="$(tar -tzf "$BK" 2>/dev/null)"
+grep -q 'secrets.yml' <<<"$lst" && grep -q 'kubeconfig-demo-x' <<<"$lst" && grep -q 'Secret_x_kubeconfig' <<<"$lst" && pass "el backup contiene secretos y Secret del backup" || fail "backup sin secretos"
+grep -q 'requirements/lib/big.bin' <<<"$lst" && fail "el backup incluye requirements/" || pass "el backup excluye requirements/ y .work/"
+grep -q 'pki/ca.key' <<<"$lst" && pass "el backup incluye ficheros ilegibles (vía contenedor auxiliar)" || fail "backup sin pki/ca.key (ilegible)"
+for f in secrets.yml cluster.yaml kubeconfig-demo-x admin.key pki apps backup requirements demo-x.json keos.yaml .config .work; do [[ -e "$D/$f" ]] && fail "no se borró $f" || pass "borrado $f"; done
+[[ ! -e "$W/keos.yaml" ]] && pass "borrado keos.yaml de la raíz" || fail "keos.yaml de la raíz sigue"
+for f in cluster.env logs/l.log templates/t.tpl notes.txt uninstall; do [[ -e "$D/$f" ]] && pass "se conserva $f" || fail "se borró $f"; done
+for f in README.md .claude/s.md docs/d.md cluster.env; do [[ -e "$W/$f" ]] && pass "raíz: se conserva $f" || fail "raíz: se borró $f"; done
+[[ ! -d "$TMPDIR/apps-layer-demo-x" ]] && pass "directorio efímero de apps-layer destruido" || fail "sigue /tmp/apps-layer-demo-x"
+rest="$(cut -d'|' -f2 "$MOCK_STATE/containers.tsv")"
+grep -q 'otro_trabajo' <<<"$rest" && grep -q 'demo-x-control-plane2' <<<"$rest" && ! grep -qE '^(demo-x-control-plane|keos-installer_demo-x|epic_swanson)$' <<<"$rest" && pass "se borraron los 3 contenedores del clúster y NO los ajenos" || fail "contenedores restantes: $rest"
+grep -q 'docker run .*rm -rf' "$MOCK_LOG" && pass "el .config de root se borró con el contenedor auxiliar" || fail "no se usó el contenedor auxiliar para rm"
+# sin imagen auxiliar: lo que no se pueda borrar se imprime como sudo (la skill no usa sudo)
+mkdir -p "$D/.config"; echo r > "$D/.config/rootowned"; MOCK_NO_IMAGE=1 $LP >/dev/null 2>&1
+MOCK_NO_IMAGE=1 "$S/uninstall.sh" local-apply --dir "$D" --root "$W" --confirm-cluster demo-x --confirm-account 111111111111 --no-backup > "$T/nosudo.out" 2>&1; rc=$?
+[[ $rc -eq 2 ]] && grep -q 'sudo rm -rf' "$T/nosudo.out" && pass "sin contenedor auxiliar imprime 'sudo rm -rf' y sale con rc=2" || fail "caso sin sudo (rc=$rc)"
+[[ -z "$(grep -nE '(^|[;&|(]|\$\()[[:space:]]*sudo[[:space:]]' "$S"/*.sh | grep -vE 'echo|printf|warn|info|komsg|okmsg|#')" ]] && pass "la skill no invoca sudo (solo lo imprime)" || fail "la skill invoca sudo"
+unset TMPDIR; cd "$W"
 
 echo; echo "== $((N-FAIL))/$N pruebas OK =="; [[ $FAIL -eq 0 ]]

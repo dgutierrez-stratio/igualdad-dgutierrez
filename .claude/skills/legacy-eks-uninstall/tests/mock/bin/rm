@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# rm FALSO: falla (como si el fichero fuera de root) si algún argumento es un directorio con un fichero "rootowned" dentro; si no, delega en /bin/rm
+for a in "$@"; do [[ -d "$a" && -e "$a/rootowned" && -z "${MOCK_RM_REAL:-}" ]] && { echo "rm: cannot remove '$a': Permission denied" >&2; exit 1; }; done
+exec /bin/rm "$@"

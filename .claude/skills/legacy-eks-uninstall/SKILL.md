@@ -1,14 +1,14 @@
 ---
 name: legacy-eks-uninstall
-description: Desinstala un clúster EKS "legacy" instalado con la skill legacy-eks-cluster y deja la cuenta AWS limpia y reutilizable, usando el finder y el remover de aws-marketplace-toolkit (PR #51 / PLT-5240 mergeada) con un filtro que protege lo que no debe borrarse (VPC por defecto, claves KMS de AWS, roles de servicio, OrganizationAccountAccessRole, la identidad del llamador). Confirma con la persona usuaria el clúster instalado y la cuenta antes de borrar. Úsala cuando se pida "desinstalar/eliminar/borrar/limpiar el clúster de igualdad", "dejar la cuenta de fábrica / limpia / como estaba", "ejecutar el finder y el remover", o "limpiar la cuenta AWS tras una instalación/migración". Para desmontar el clúster paso a paso con CAPI (y apps-layer/contenedores locales) sigue existiendo teardown.sh en legacy-eks-cluster.
+description: Desinstala un clúster EKS "legacy" instalado con la skill legacy-eks-cluster y deja la cuenta AWS limpia y reutilizable, usando el finder y el remover de aws-marketplace-toolkit (PR #51 / PLT-5240 mergeada) con un filtro que protege lo que no debe borrarse (VPC por defecto, claves KMS de AWS, roles de servicio, OrganizationAccountAccessRole, la identidad del llamador). Después limpia lo LOCAL de esa instalación (contenedores docker, directorio efímero de apps-layer y ficheros generados del workspace) con backup previo. Confirma con la persona usuaria el clúster instalado y la cuenta antes de borrar. Úsala cuando se pida "desinstalar/eliminar/borrar/limpiar el clúster de igualdad", "dejar la cuenta de fábrica / limpia / como estaba", "limpiar el workspace/los dockers para reinstalar", "ejecutar el finder y el remover", o "limpiar la cuenta AWS tras una instalación/migración". Para desmontar el clúster paso a paso con CAPI (y apps-layer/contenedores locales) sigue existiendo teardown.sh en legacy-eks-cluster.
 ---
 
 # legacy-eks-uninstall
 
 Deja la cuenta AWS donde se instaló un clúster legacy (cloud-provisioner + keos-installer + apps-layer, y lo que se hiciera después sobre ella) **como si nunca hubiera pasado nada**, sin perder el acceso por CLI/consola. El trabajo pesado lo hace el **remover** de Stratio (`aws-marketplace-toolkit`); esta skill
-(1) identifica y confirma el clúster, (2) ejecuta el **finder**, (3) **filtra** lo que no debe borrarse, (4) ejecuta el remover en pasadas y (5) verifica el resultado.
+(1) identifica y confirma el clúster, (2) ejecuta el **finder**, (3) **filtra** lo que no debe borrarse, (4) ejecuta el remover en pasadas, (5) verifica el resultado y (6) limpia lo **local** de la instalación (contenedores docker, directorio efímero de apps-layer, ficheros generados del workspace) dejando un backup.
 
-`SK` = directorio de esta skill. Los scripts son autocontenidos y **solo leen AWS** (un guard bloquea cualquier operación que no sea `describe|list|get`); los borrados los hace únicamente el remover. Los ficheros de cada ejecución (sin secretos) van a `<dir-del-clúster>/uninstall/`.
+`SK` = directorio de esta skill. Los scripts son autocontenidos y **solo leen AWS** (un guard bloquea cualquier operación que no sea `describe|list|get`); los borrados los hace únicamente el remover. Los ficheros de cada ejecución (sin secretos) van a `<dir-del-clúster>/uninstall/`. La fase local solo toca contenedores docker del clúster, `/tmp/apps-layer-<cluster>` y los ficheros generados listados abajo; **nunca** `~/.aws`, `/etc/hosts`, git, `cluster.env` ni `logs/`, y no usa `sudo`.
 
 ## Supuestos (si no se cumplen, parar)
 
@@ -29,26 +29,35 @@ Deja la cuenta AWS donde se instaló un clúster legacy (cloud-provisioner + keo
    `uninstall.sh apply --dir <dir> --confirm-cluster <cluster> --confirm-account <cuenta>` (en segundo plano, `run_in_background`: tarda decenas de minutos; no hagas sondeos, avisa al terminar). Hace hasta 4 pasadas (finder → filtro → remover, con `timeout` de 1200 s por pasada) y para si una pasada repite exactamente los mismos recursos (sin progreso) o si aparecen recursos que **no estaban en el plan revisado**. Termina con `verify`.
 5. **Verificar e informar** — `verify` (solo lectura; sale con 2 si queda algo): ¿queda algo del clúster o compartido?, ¿sigue idéntico `OrganizationAccountAccessRole` (confianza y políticas) respecto a la foto previa?, ¿sin instance profiles huérfanas? Informa de qué se borró, qué se protegió, qué quedó y por qué. Recuerda lo que queda **fuera de AWS** (abajo).
 
+6. **Limpieza local (plan, no borra)** — solo cuando `verify` salió OK (la propia skill lo exige: EKS, VPC y zonas inexistentes y `clean-after.json` vacío; si no, se niega, porque aquí se destruyen kubeconfig y secretos que aún harían falta). `uninstall.sh local-plan --dir <dir> [--root <raíz-del-workspace>]` lista:
+   - **contenedores docker** del clúster: `<cluster>-control-plane` (kind retenido), `keos-installer_<cluster>`, `apps-layer-<cluster>` y los de nombre aleatorio cuyo bind-mount sea el directorio del clúster o la raíz indicada. Solo imágenes `cloud-provisioner`, `keos-installer` o `apps-layer-automation`; **los demás contenedores no se tocan**.
+   - el **directorio efímero** `/tmp/apps-layer-<cluster>` (claves S3 y token del LLM): shred + borrado.
+   - los **ficheros generados**: secretos (`secrets.yml`, `cluster.yaml`, `kubeconfig-*`, `admin.key/cert`, `pki/`, `.kube/`, `.config/`, `.keos_bash_history`) y regenerables (`keos.yaml`, `override_vars/`, `override_charts_values/`, `apps/`, `backup/`, `<cluster>.json`, `*-tenant.yaml`, `*_group.json`, `*-users_role.json`, `.work/`, `requirements/`...). Con `--root` se aplica igual a la raíz del workspace (nunca toca `.claude/`, `docs/`, README ni scripts); si es un repo git, un fichero versionado con cambios sin commit **aborta**.
+   - lo que **se conserva**: `cluster.env`, `logs/`, `templates/`, `uninstall/`; lo no reconocido se lista y se conserva.
+   Muéstralo y pregunta (AskUserQuestion). Avisa de que lo **no versionado** solo quedará en el backup.
+7. **Limpieza local (ejecución)** — con el "sí" explícito: `uninstall.sh local-apply --dir <dir> [--root <raíz>] --confirm-cluster <cluster> --confirm-account <cuenta> [--backup-dir <dir>]`. Orden: (a) **backup** `~/backups/<cluster>-workspace-<fecha>.tar.gz` (permisos 600, sin `requirements/` ni `.work/`, entradas relativas a `/`: se restaura con `tar -xzf <fichero> -C /`); si hay ficheros de `root` ilegibles, los lee un contenedor auxiliar con la imagen local de keos-installer, sin `sudo`; si no hay imagen aborta (salvo `--accept-partial-backup`/`--no-backup`); (b) `docker rm -f` de los contenedores; (c) destruye el directorio efímero; (d) borra los ficheros (los de `root` con el mismo contenedor auxiliar; lo que no se pueda lo imprime como `sudo rm -rf …` y sale con 2). Si entre el plan y la ejecución aparece algo nuevo, aborta.
+   Al terminar la skill imprime lo que queda **fuera de su alcance**: la línea de `/etc/hosts` (con el comando `sudo sed` para quitarla), el perfil `cloud-provisioner` de `~/.aws` (el paso 1 de la instalación lo regenera) y el estado GitOps en git.
+
 ## Reglas
 
-- **Nunca** `apply` sin haber hecho `plan` en esta sesión y sin la confirmación explícita del paso 2 y la del paso 4. Los flags `--confirm-*` los escribes tú **solo después** de esas confirmaciones.
+- **Nunca** `apply` ni `local-apply` sin haber hecho el `plan`/`local-plan` correspondiente en esta sesión y sin la confirmación explícita del paso 2 y la del paso 4 (y la del paso 7 para lo local). **Nunca** `--no-backup` salvo que la persona lo pida expresamente tras saber qué se pierde. Los flags `--confirm-*` los escribes tú **solo después** de esas confirmaciones.
 - **Nunca** editar a mano `clean.json`/`context.json` ni "arreglar" el filtro para que borre algo: el script lo detecta (sha256) y es lo que se revisó. Para proteger algo extra: `UNINSTALL_PROTECTED_IDS` / `UNINSTALL_PROTECTED_NAMES` en `cluster.env` y volver a `plan`.
 - **No tocar el clúster** (ni kubectl, ni helm, ni escalar controladores): lo pidió así el flujo. Como CAPA/Flux viven dentro del EKS pueden recrear recursos durante una pasada; las pasadas siguientes lo recogen y la regla "recursos no revisados" lo vigila.
 - Si el remover se corta por `timeout` (código 124) casi seguro es un reintento sin límite de subnets/ENI (limitación conocida, ver `references/ownership-and-protection.md`): mira el log de la pasada, no subas el timeout a ciegas.
 - Si `plan` falla por handlers ausentes, la cuenta no se puede dejar limpia con este remover: parar y avisar, no usar `SKIP_HANDLER_CHECK`.
-- No borrar nada de la cuenta a mano salvo que la persona lo pida (p. ej. una instance profile huérfana que `verify` señale).
+- No borrar nada de la cuenta a mano salvo que la persona lo pida (p. ej. una instance profile huérfana que `verify` señale). Lo mismo para contenedores o ficheros que la fase local no liste.
 
-## Qué queda fuera de AWS (no lo toca; recordarlo al final)
+## Qué queda fuera (no lo toca ni con la fase local; recordarlo al final)
 
-Perfil local `cloud-provisioner` en `~/.aws` (su clave ya no existe), línea de `/etc/hosts`, estado GitOps en git (`clusters/<cluster>` en flux-stratio/keos-fleet; los pushes solo al repo oficial), el directorio de trabajo `clusters/<cluster>` (conserva `cluster.env`, `logs/` y ahora `uninstall/`) y los contenedores locales `keos-installer*`/`apps-layer-*` (los limpia la fase A de `legacy-eks-cluster/scripts/teardown.sh`).
+Perfil local `cloud-provisioner` en `~/.aws` (su clave ya no existe; la instalación lo regenera), línea de `/etc/hosts` (la skill imprime el `sudo sed`), estado GitOps en git (`clusters/<cluster>` en flux-stratio/keos-fleet; los pushes solo al repo oficial) y el repositorio git del workspace.
 
 ## Ficheros
 
 ```
-scripts/uninstall.sh          identify | plan | apply | verify
+scripts/uninstall.sh          identify | plan | apply | verify | local-plan | local-apply
 scripts/filter-resources.sh   filtro PURO (jq): clasifica cada recurso en protected / shared / owned / unowned
 scripts/lib.sh                utilidades; resolución del toolkit; awsx de solo lectura
 references/ownership-and-protection.md   reglas del filtro, motivos, límites conocidos
-tests/run-offline-tests.sh    55 pruebas con aws/python falsos (sin AWS); mock/ y fixtures/ ficticios
+tests/run-offline-tests.sh    113 pruebas con aws/python/docker falsos (sin AWS ni docker real); mock/ y fixtures/ ficticios
 ```
 Pruebas: `bash $SK/tests/run-offline-tests.sh` (no toca AWS).

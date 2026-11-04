@@ -30,3 +30,6 @@ logs/
 
 # Backup de objetos del clúster (también docs/backup-originales): los Secret (kubeconfig, certificados) nunca a git
 **/objects/Secret_*
+
+# Salidas de ejecución de la skill legacy-eks-uninstall (plan, contexto, baseline, logs)
+uninstall/
