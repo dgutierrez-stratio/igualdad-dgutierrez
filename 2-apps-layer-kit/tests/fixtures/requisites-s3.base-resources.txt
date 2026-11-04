@@ -1,0 +1,61 @@
+  InternalS3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref InternalS3BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Ref InternalS3BucketName
+        - Key: cluster
+          Value: !Ref ClusterName
+  S3StratioAppsIAMUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Ref InternalS3BucketUser
+      Tags:
+        - Key: cluster
+          Value: !Ref ClusterName
+      Policies:
+        - PolicyName: "s3-stratio-apps"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: "s3:ListAllMyBuckets"
+                Resource: "*"
+              - Effect: "Allow"
+                Action: "s3:*"
+                Resource:
+                  - !Sub "arn:aws:s3:::${InternalS3BucketName}"
+                  - !Sub "arn:aws:s3:::${InternalS3BucketName}/*"
+              - Effect: "Deny"
+                NotAction: "s3:*"
+                NotResource:
+                  - !Sub "arn:aws:s3:::${InternalS3BucketName}"
+                  - !Sub "arn:aws:s3:::${InternalS3BucketName}/*"
+  S3StratioAppsIAMUserAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      Status: Active
+      UserName: !Ref S3StratioAppsIAMUser
+  S3StratioAppsSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Ref InternalS3BucketUser
+      Description: !Sub "Access and secret key for IAM user ${InternalS3BucketUser}"
+      Tags:
+        - Key: cluster
+          Value: !Ref ClusterName
+      SecretString: !Sub '{"ACCESS_KEY":"${S3StratioAppsIAMUserAccessKey}","SECRET_KEY":"${S3StratioAppsIAMUserAccessKey.SecretAccessKey}"}'

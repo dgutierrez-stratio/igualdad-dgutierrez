@@ -1,0 +1,49 @@
+{
+ "cluster": "demo-x",
+ "account": "111111111111",
+ "region": "eu-west-1",
+ "domain": "demo-x.desa.int",
+ "caller_arn": "arn:aws:sts::111111111111:assumed-role/OrganizationAccountAccessRole/s",
+ "caller_name": "OrganizationAccountAccessRole",
+ "default_vpc": {
+  "vpc": "vpc-0f717d5c98b8ddb9b",
+  "members": [
+   "subnet-066202e0d96b8cac2",
+   "subnet-0e207fa920d6563fb",
+   "subnet-020a2a7caed41dba0",
+   "rtb-0c88fa6c255789fb7",
+   "sg-05a093ea0e7bb85a5"
+  ]
+ },
+ "kms_aws_managed": [
+  "479952cb-bca7-4ead-827a-abebaff570e2",
+  "66da5b7d-b834-42ab-9cd0-4479f093385c",
+  "db4820f1-549b-42ff-8d10-ab423424ecef"
+ ],
+ "cluster_vpc": "vpc-0f7b98399966cea8c",
+ "cluster_vpc_members": [
+  "subnet-0b39e391217ffce89",
+  "subnet-0dd9b6072b472734f",
+  "subnet-0c1af19dfc33ada17",
+  "subnet-0c59882af2131d688",
+  "subnet-0a4660ff0faff3644",
+  "subnet-07b3596c1b53be310",
+  "rtb-050767d8018a04169",
+  "rtb-0a5fac81cae48bd5f",
+  "rtb-012d8b3ccffae5ae0",
+  "rtb-08f13e0d5a5e03c31",
+  "rtb-0b576c1a7795e4125",
+  "sg-0ccab318e6355594b",
+  "sg-0fd23b89905bf33c8",
+  "sg-00ed32e7b62496fcf"
+ ],
+ "oidc_issuer_id": "63BA1279FAA45B570D610883DBA2971C",
+ "zones": {
+  "/hostedzone/Z02446212LYFCJLOWHXVL": "demo-x.desa.int.",
+  "/hostedzone/Z01066162ONKJUYVJEHP9": "demo-x.desa.int."
+ },
+ "dedicated_account": true,
+ "keep_shared": false,
+ "protected_ids": [],
+ "protected_names": []
+}

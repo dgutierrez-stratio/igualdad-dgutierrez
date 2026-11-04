@@ -1,0 +1,1 @@
+{"RouteTables":[{"RouteTableId":"rtb-main","Associations":[{"Main":true,"RouteTableAssociationId":"rtbassoc-m"}]},{"RouteTableId":"rtb-pub","Associations":[{"Main":false,"RouteTableAssociationId":"rtbassoc-1"}]}]}

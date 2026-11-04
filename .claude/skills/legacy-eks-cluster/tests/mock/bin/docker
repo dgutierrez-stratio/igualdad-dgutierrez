@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+echo "docker :: $*" >> "${MOCK_LOG:?}"
+case "$1" in
+  info|version) echo ok ;;
+  ps) if [[ -n "${MOCK_APPS_UP:-}" && "$*" == *"--filter"* && "$*" == *"name=^/apps-layer-demo-x"* ]]; then echo "apps-layer-demo-x"
+      elif [[ -n "${MOCK_APPS_UP:-}" && "$*" == *"--filter"* && "$*" == *"name=^/keos-installer_demo-x"* ]]; then echo "keos-installer_demo-x"
+      elif [[ -n "${MOCK_APPS_OTHER:-}" && "$*" == *"--format"* && "$*" != *"--filter"* ]]; then echo "adoring_raman qa.int.stratio.com/stratio/apps-layer-automation:15.1-0.1.0-SNAPSHOT"
+      elif [[ "$*" != *" -a "* && "$*" == *"--filter"* && -n "${MOCK_KIND_UP:-}" ]]; then echo "demo-x-control-plane"; fi ;;
+  inspect) case "$*" in
+      *apps-layer-demo-x*) echo "${MOCK_APPS_IMG:-qa.int.stratio.com/stratio/apps-layer-automation:15.1-0.1.0-SNAPSHOT}" ;;
+      *keos-installer_demo-x*) echo "qa.int.stratio.com/stratio/keos-installer:1.4.2" ;;
+      *) echo "cloud-provisioner:0.9.8" ;; esac ;;
+  exec) if [[ "$*" == *clusterctl* ]]; then echo "Moving Cluster API objects Clusters=1"; else echo "mock-exec"; fi ;;
+  *) : ;;
+esac
+exit 0

@@ -1,0 +1,33 @@
+{
+    "descriptor": {
+        "service": "Dashboards-Opensearch",
+        "model": "default",
+        "version": "15.1.0"
+    },
+    "deployment": {
+        "general": {
+            "serviceId": "opensearch1-dashboards",
+            "namespaces": {
+                "k8sNamespace": "dev-datastores"
+            },
+            "dependencies": {
+                "opensearch": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Aopensearch1.dev-datastores"
+            }
+        },
+        "specification": {
+            "resources": {
+                "limits": {
+                    "cpu": "0.75",
+                    "memory": "384M"
+                },
+                "requests": {
+                    "cpu": "0.25",
+                    "memory": "384M"
+                }
+            },
+            "exposition": {
+                "hosts": "admin.igualdad-dgutierrez.desa.int"
+            }
+        }
+    }
+}

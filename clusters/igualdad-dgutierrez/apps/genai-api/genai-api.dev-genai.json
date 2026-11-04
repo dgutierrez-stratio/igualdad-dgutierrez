@@ -1,0 +1,39 @@
+{
+    "descriptor": {
+        "service": "genai",
+        "model": "genai-api",
+        "version": "15.1.0"
+    },
+    "deployment": {
+        "general": {
+            "networking": {
+                "ssoHost": "admin.igualdad-dgutierrez.desa.int",
+                "haProxyHost": "admin.igualdad-dgutierrez.desa.int",
+                "haProxyPath": "/genai-api.dev-genai"
+            },
+            "serviceId": "genai-api",
+            "namespaces": {
+                "k8sNamespace": "dev-genai"
+            },
+            "dependencies": {
+                "genaiLiteLLM": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Agenai-litellm.dev-genai",
+                "postgresConnectionDB": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Apool-psql.dev-datastores&host=pool-psql",
+                "postgresPolicies": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Apsql.dev-datastores"
+            },
+            "priorities": {
+                "application": "https://cct-paas-services:8443/v1/priority-classes/metadata?q=applications-normal"
+            },
+            "resources": {
+                "memLimit": 2048,
+                "CPUs": 0.5,
+                "cpuLimit": 2,
+                "MEM": 2048
+            }
+        },
+        "settings": {
+            "agents": {
+                
+            }
+        }
+    }
+}

@@ -1,0 +1,40 @@
+{
+    "descriptor": {
+        "service": "Opensearch",
+        "model": "default",
+        "version": "15.1.0"
+    },
+    "deployment": {
+        "general": {
+            "serviceId": "opensearch1",
+            "namespaces": {
+                "k8sNamespace": "keos-core"
+            }
+        },
+        "specification": {
+            "security": {
+                "serviceAccount": {
+                    "name": "opensearch1"
+                }
+            },
+            "config": {
+                "plugins": [{"name": "analysis-phonetic","repository": "https://artifacts.opensearch.org/releases/plugins/analysis-phonetic/3.6.0/analysis-phonetic-3.6.0.zip"}]
+            },
+            "nodeGroups": [
+                {
+                    "resources": {
+                        "limits": {
+                            "cpu": 1,
+                            "memory": "2048M"
+                        },
+                        "requests": {
+                            "cpu": 0.1,
+                            "memory": "2048M"
+                        }
+                    }
+                }
+            ]
+        }
+    },
+    "applicationId": "opensearch1.keos-core"
+}

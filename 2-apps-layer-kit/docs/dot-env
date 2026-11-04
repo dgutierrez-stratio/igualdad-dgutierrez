@@ -1,0 +1,3 @@
+export DOCKER_DIND_ENABLED=false
+export KEOS_WORKSPACE_DIR=/stratio/e/igualdad
+export KEOS_INSTALLER_EXTRA_ARGS="--net host"

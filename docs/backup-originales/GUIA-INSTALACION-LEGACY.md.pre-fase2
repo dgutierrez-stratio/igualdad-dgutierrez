@@ -1,0 +1,300 @@
+# Instalación de un clúster EKS "legacy" con cloud-provisioner
+
+Guía reutilizable para crear un clúster como el del cliente (cloud-provisioner con `gitops_enabled: false`),
+basada en `instalacion-cliente-legacy.md` de la PR Stratio/keos-fleet#220 (PLT-4419). Todo lo específico de
+un entorno (nombre, cuenta, dominio, red, versiones) está en `cluster.env`; para otro clúster basta con otro
+`cluster.env` y repetir los pasos.
+
+Se ejecuta por pasos y cada paso termina con una **validación**: no se pasa al siguiente hasta que da OK.
+Los pasos 1-3 crean recursos en AWS. El paso 5 (cloud-provisioner) se lanza a mano en otro terminal.
+
+## Ficheros
+
+| Fichero | Para qué |
+|---|---|
+| `cluster.env.example` → `cluster.env` | Variables del clúster. Sin secretos. |
+| `create-test-vpc.sh` | Crea VPC + subnets (públicas y privadas) + NAT. Escribe `${CLUSTER_NAME}.json`. |
+| `cluster.yaml.tpl` | Plantilla del descriptor de cloud-provisioner. |
+| `render-cluster.sh` | Genera `cluster.yaml` a partir de la plantilla, `cluster.env`, el JSON de la VPC y las claves IAM. |
+| `cluster.yaml` | Generado. **Contiene access/secret key**: permisos 600, no se sube a git. |
+
+## Progreso
+
+| Paso | Qué | Estado |
+|---|---|---|
+| 0 | Preparación y variables | ✅ |
+| 1 | Usuario IAM `cloud-provisioner` | ✅ |
+| 2 | Policy de pull through cache de ECR | ✅ |
+| 2b | Acceso al ECR central (comprobación) | ✅ |
+| 3 | VPC y subnets | ✅ |
+| 4 | Renderizar `cluster.yaml` | ✅ |
+| 5 | cloud-provisioner (lo lanzas tú) | ⬜ |
+| 6 | Validación del clúster | ⬜ |
+| 7 | Limpieza (solo cuando toque) | ⬜ |
+
+---
+
+## 0. Preparación
+
+### 0.1 Binario de cloud-provisioner
+
+cloud-provisioner es el proyecto [Stratio/kind](https://github.com/Stratio/kind) (fork de kind). Sus releases de
+GitHub no traen binarios; se compila desde el tag de la versión elegida (`CLOUD_PROVISIONER_VERSION`) o se usa un
+binario ya disponible (el empaquetado se sube a un Nexus interno). Compilar necesita Go (el `go.mod` pide 1.26, el
+`go` del sistema puede ser más antiguo: con `GOTOOLCHAIN=auto` descarga el toolchain) y varios GB libres en disco.
+
+```bash
+# Solo si no tienes ya el binario de esa versión
+git clone --depth 1 --branch "$CLOUD_PROVISIONER_VERSION" https://github.com/Stratio/kind.git ~/src/cloud-provisioner-$CLOUD_PROVISIONER_VERSION
+cd ~/src/cloud-provisioner-$CLOUD_PROVISIONER_VERSION
+FORCE_HOST_GO=1 GOTOOLCHAIN=auto make clean build      # deja bin/cloud-provisioner
+./bin/cloud-provisioner version                        # debe mostrar $CLOUD_PROVISIONER_VERSION
+cd -
+```
+
+El binario resultante es el que va en `CLOUD_PROVISIONER_BIN` (ruta absoluta). Importante: sin `--build-stratio-image`,
+cloud-provisioner **descarga** la imagen de arranque `$ECR_REGISTRY/stratio/cloud-provisioner:<versión del binario>`,
+así que esa imagen tiene que existir en el ECR con ese tag (ver paso 2b).
+
+### 0.2 Variables
+
+```bash
+cp cluster.env.example cluster.env      # solo la primera vez; ajustar CLUSTER_NAME, cuenta, versión, etc.
+# editar cluster.env y rellenar CLOUD_PROVISIONER_BIN con la ruta absoluta del binario
+source ./cluster.env
+export AWS_PAGER=""                      # evita que el paginador de aws deje colgado el terminal
+export VAULT_PASSWORD='...'             # solo en tu terminal; no se escribe en ningún fichero
+```
+
+`ADMIN_PROFILE` es un perfil con acceso de administrador a la cuenta (aquí `igualdad`, un rol asumido sobre la
+cuenta 821111360971). `CP_PROFILE` (`cloud-provisioner`) es el perfil del usuario IAM que crea el paso 1.
+
+**Validación**
+
+```bash
+for t in aws jq yq envsubst kubectl helm docker; do command -v $t >/dev/null && echo "ok  $t" || echo "FALTA $t"; done
+type -a aws | head -3; aws --version                                              # los scripts bash usan el primer aws del PATH: debería ser la v2 (la v1 vale, pero avisa)
+docker info >/dev/null 2>&1 && echo "ok  docker en marcha" || echo "FALTA docker en marcha"
+"$CLOUD_PROVISIONER_BIN" --help >/dev/null 2>&1 && echo "ok  cloud-provisioner" || echo "FALTA CLOUD_PROVISIONER_BIN"
+"$CLOUD_PROVISIONER_BIN" version | grep -q "$CLOUD_PROVISIONER_VERSION" && echo "ok  versión $CLOUD_PROVISIONER_VERSION" || echo "KO  la versión del binario no coincide"
+[ -n "$VAULT_PASSWORD" ] && echo "ok  VAULT_PASSWORD definido" || echo "FALTA VAULT_PASSWORD"
+df -h / | tail -1                                                                  # hay que tener varios GB libres para las imágenes de kind
+aws sts get-caller-identity --profile "$ADMIN_PROFILE" --query Account --output text   # = $AWS_ACCOUNT_ID
+aws eks list-clusters --region "$AWS_REGION" --profile "$ADMIN_PROFILE" --query 'clusters' --output text
+```
+
+OK si: todo `ok`, la cuenta coincide con `AWS_ACCOUNT_ID` y no existe ya un clúster con el mismo nombre.
+
+## 1. Usuario IAM para cloud-provisioner
+
+Usuario `cloud-provisioner` con `AdministratorAccess` en la cuenta. Su access key se guarda en el perfil
+`$CP_PROFILE` sin mostrarla por pantalla: son las mismas claves que van en `spec.credentials.aws` del descriptor.
+IAM es global por cuenta: se crea una sola vez por cuenta. Si el usuario ya existe, **no crees otra key
+sin mirar** (el máximo es 2 por usuario): revisa con `aws iam list-access-keys`.
+
+```bash
+aws iam get-user --user-name cloud-provisioner --profile "$ADMIN_PROFILE" --query User.Arn --output text   # NoSuchEntity = hay que crearlo
+
+aws iam create-user --user-name cloud-provisioner --profile "$ADMIN_PROFILE"
+aws iam attach-user-policy --user-name cloud-provisioner \
+  --policy-arn arn:aws:iam::aws:policy/AdministratorAccess --profile "$ADMIN_PROFILE"
+
+read -r ACCESS_KEY_ID SECRET_ACCESS_KEY < <(aws iam create-access-key --user-name cloud-provisioner \
+  --profile "$ADMIN_PROFILE" --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text)
+aws configure set aws_access_key_id "$ACCESS_KEY_ID" --profile "$CP_PROFILE"
+aws configure set aws_secret_access_key "$SECRET_ACCESS_KEY" --profile "$CP_PROFILE"
+aws configure set region "$AWS_REGION" --profile "$CP_PROFILE"
+unset ACCESS_KEY_ID SECRET_ACCESS_KEY
+```
+
+**Validación** (la propagación de IAM puede tardar unos segundos: reintenta)
+
+```bash
+aws sts get-caller-identity --profile "$CP_PROFILE"     # Arn = arn:aws:iam::<cuenta>:user/cloud-provisioner
+aws iam list-access-keys --user-name cloud-provisioner --profile "$CP_PROFILE" --query 'AccessKeyMetadata[].[AccessKeyId,Status]' --output text
+aws iam list-attached-user-policies --user-name cloud-provisioner --profile "$CP_PROFILE" --query 'AttachedPolicies[].PolicyName' --output text
+```
+
+OK si: `Account` = `AWS_ACCOUNT_ID`, `Arn` termina en `user/cloud-provisioner`, una key `Active` y `AdministratorAccess` adjunta.
+
+## 2. Policy del pull through cache de ECR
+
+Una vez por cuenta. Permite a los nodos importar imágenes del registry upstream en el pull through cache de ECR;
+es la que se referencia en `spec.security.aws.nodegroup_extra_policy_arn` del descriptor.
+
+```bash
+aws iam get-policy --policy-arn "$ECR_POLICY_ARN" --profile "$CP_PROFILE" --query Policy.Arn --output text 2>/dev/null \
+  || aws iam create-policy --policy-name "$ECR_POLICY_NAME" --profile "$CP_PROFILE" --policy-document '{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Action": ["ecr:BatchImportUpstreamImage", "ecr:CreateRepository"], "Effect": "Allow", "Resource": ["*"] }
+  ]
+}'
+```
+
+**Validación**
+
+```bash
+aws iam get-policy --policy-arn "$ECR_POLICY_ARN" --profile "$CP_PROFILE" --query 'Policy.[Arn,DefaultVersionId]' --output text
+aws iam get-policy-version --policy-arn "$ECR_POLICY_ARN" --version-id v1 --profile "$CP_PROFILE" \
+  --query 'PolicyVersion.Document.Statement[0].Action' --output text
+```
+
+OK si: el ARN coincide con `ECR_POLICY_ARN` y las acciones son `ecr:BatchImportUpstreamImage` y `ecr:CreateRepository`.
+
+## 2b. Acceso al ECR central (comprobación previa, lectura)
+
+Esta policy solo da permiso del lado IAM. La URL del registry (`$ECR_REGISTRY`, cuenta `717279725338`) es de otra
+cuenta, y cloud-provisioner la usa con las claves del usuario `cloud-provisioner` **antes** de que existan los nodos:
+`docker pull` de la imagen de arranque, descarga de los charts OCI (`/helm`) y las imágenes con prefijo
+(`/docker.io`, `/quay.io`, `/ghcr.io`, `/registry.k8s.io`, `/public.ecr.aws`) de las reglas de pull through cache, que
+viven en esa cuenta y no hay que crearlas en la tuya. Que la cuenta destino pueda leer ese registry lo decide la
+política del registry/repositorios de `717279725338`, no algo que se configure aquí. Se asume que ya lo permite; esta
+comprobación lo confirma en segundos en vez de al cabo de minutos de instalación:
+
+```bash
+aws ecr get-login-password --region "$AWS_REGION" --profile "$CP_PROFILE" \
+  | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+docker manifest inspect "$ECR_REGISTRY/stratio/cloud-provisioner:$CLOUD_PROVISIONER_VERSION" >/dev/null \
+  && echo "ok  imagen de arranque accesible" || echo "KO  no se puede leer la imagen de arranque"
+```
+
+OK si: el login da `Login Succeeded` y la imagen es accesible. Si falla con `denied`/`not authorized`, hay que pedir a
+quien administre la cuenta `717279725338` que permita la lectura a la cuenta `AWS_ACCOUNT_ID`. Si falla con
+`not found`, esa versión no está publicada en el registry: cambiar `CLOUD_PROVISIONER_VERSION`.
+Nota: el `docker login` guarda un token (12 h) en `~/.docker/config.json`.
+
+## 3. VPC y subnets
+
+VPC `$VPC_CIDR` en `$VPC_AZS` AZs, con una subnet pública y una privada por AZ y los NAT Gateways según
+`$VPC_NAT_MODE` (`single` = uno compartido). El script aborta si ya existe una VPC con ese `Name`.
+Tarda unos minutos (espera a que el NAT esté `available`).
+
+```bash
+bash ./create-test-vpc.sh --name "$CLUSTER_NAME" --azs "$VPC_AZS" --region "$AWS_REGION" \
+  --profile "$CP_PROFILE" --vpc-cidr "$VPC_CIDR" --nat-mode "$VPC_NAT_MODE" --output "./${CLUSTER_NAME}.json"
+```
+
+**Validación**
+
+```bash
+VPC_ID=$(jq -r .vpc_id "./${CLUSTER_NAME}.json"); echo "$VPC_ID"
+cpaws() { aws --profile "$CP_PROFILE" --region "$AWS_REGION" "$@"; }   # función (en zsh una variable con opciones no se divide en palabras)
+cpaws ec2 describe-vpcs --vpc-ids "$VPC_ID" --query 'Vpcs[0].[State,CidrBlock]' --output text                 # available <cidr>
+cpaws ec2 describe-vpc-attribute --vpc-id "$VPC_ID" --attribute enableDnsSupport --query 'EnableDnsSupport.Value' --output text    # True
+cpaws ec2 describe-vpc-attribute --vpc-id "$VPC_ID" --attribute enableDnsHostnames --query 'EnableDnsHostnames.Value' --output text # True
+cpaws ec2 describe-subnets --filters Name=vpc-id,Values="$VPC_ID" \
+  --query 'Subnets[].[AvailabilityZone,SubnetId,CidrBlock,Tags[?Key==`Name`]|[0].Value]' --output text | sort
+cpaws ec2 describe-nat-gateways --filter Name=vpc-id,Values="$VPC_ID" --query 'NatGateways[].[NatGatewayId,State]' --output text
+cpaws ec2 describe-route-tables --filters Name=vpc-id,Values="$VPC_ID" \
+  --query 'RouteTables[].[Tags[?Key==`Name`]|[0].Value,Routes[?DestinationCidrBlock==`0.0.0.0/0`]|[0].GatewayId,Routes[?DestinationCidrBlock==`0.0.0.0/0`]|[0].NatGatewayId]' --output text
+```
+
+OK si: VPC `available` con DNS support y hostnames a `True`; `2 × VPC_AZS` subnets repartidas por AZ; NAT(s) `available`;
+la route table `-public` sale por `igw-…` y las `-private-N` por `nat-…`.
+
+## 4. Descriptor `cluster.yaml`
+
+Se genera, no se edita a mano. `render-cluster.sh` lee `vpc_id` y las subnets privadas de `${CLUSTER_NAME}.json`
+y las claves del perfil `$CP_PROFILE`; falla si falta algo o queda algún `${...}` sin resolver.
+
+```bash
+./render-cluster.sh
+```
+
+**Validación**
+
+```bash
+ls -l cluster.yaml | cut -c1-10                                             # -rw-------
+grep -c '\${' cluster.yaml                                                  # 0
+yq -r '[.kind, .metadata.name] | @tsv' cluster.yaml                         # KeosCluster y ClusterConfig con el nombre esperado
+yq -r 'select(.kind=="KeosCluster") | [.spec.external_domain, .spec.region, .spec.networks.vpc_id, (.spec.networks.subnets|length)] | @tsv' cluster.yaml
+yq -r 'select(.kind=="KeosCluster") | .spec.networks.subnets[].subnet_id' cluster.yaml | while read s; do
+  aws ec2 describe-subnets --subnet-ids "$s" --profile "$CP_PROFILE" --region "$AWS_REGION" \
+    --query 'Subnets[0].[SubnetId,VpcId,AvailabilityZone,MapPublicIpOnLaunch]' --output text; done
+yq -r 'select(.kind=="ClusterConfig") | .spec.gitops_enabled' cluster.yaml  # false
+yq -r 'select(.kind=="KeosCluster") | .spec.security.aws.nodegroup_extra_policy_arn' cluster.yaml   # = ECR_POLICY_ARN
+```
+
+OK si: permisos `600`, ningún `${`, las 3 subnets pertenecen a `vpc_id`, están en AZs distintas, son privadas
+(`MapPublicIpOnLaunch` = `False`) y `gitops_enabled` es `false`.
+
+## 5. cloud-provisioner (lo lanzas tú, en otro terminal)
+
+En el otro terminal, desde este directorio, con `cluster.env` cargado y `VAULT_PASSWORD` exportado:
+
+```bash
+cd /stratio/e/igualdad
+source ./cluster.env
+export VAULT_PASSWORD='...'
+export AWS_PROFILE="$CP_PROFILE"
+
+"$CLOUD_PROVISIONER_BIN" create cluster --name "$CLUSTER_NAME" --descriptor cluster.yaml \
+  --vault-password "$VAULT_PASSWORD" --retain --delete-previous
+```
+
+Antes de lanzarlo en serio, valida el descriptor (lee `cluster.yaml`, comprueba credenciales y permisos de AWS; **no** crea
+nada ni escribe `secrets.yml`). Debe terminar con `Cluster descriptor is valid`:
+
+```bash
+"$CLOUD_PROVISIONER_BIN" create cluster --name "$CLUSTER_NAME" --descriptor cluster.yaml \
+  --vault-password "$VAULT_PASSWORD" --validate-only
+```
+
+El `create` real descarga la imagen de arranque del ECR, crea un clúster kind local en Docker y deja en este directorio
+`secrets.yml` (credenciales cifradas con `VAULT_PASSWORD`; guarda esa contraseña, se pide en ejecuciones posteriores) y
+`keos.yaml` (el descriptor para keos-installer). Según la documentación de Stratio/kind, tras la primera ejecución la
+sección `credentials` ya no se lee del descriptor sino de `secrets.yml`.
+
+Mientras corre (decenas de minutos) se puede seguir su avance desde aquí, solo lectura:
+
+```bash
+cpaws() { aws --profile "$CP_PROFILE" --region "$AWS_REGION" "$@"; }   # función (en zsh una variable con opciones no se divide en palabras)
+cpaws eks describe-cluster --name "$CLUSTER_NAME" --query 'cluster.[status,version]' --output text    # CREATING → ACTIVE
+cpaws eks list-nodegroups --cluster-name "$CLUSTER_NAME" --output text
+cpaws ec2 describe-instances --filters Name=instance-state-name,Values=pending,running \
+  --query 'Reservations[].Instances[].[InstanceId,InstanceType,State.Name]' --output text
+cpaws route53 list-hosted-zones-by-name --dns-name "$EXTERNAL_DOMAIN" --query 'HostedZones[].[Name,Id,Config.PrivateZone]' --output text
+cpaws ecr describe-pull-through-cache-rules --query 'pullThroughCacheRules[].[ecrRepositoryPrefix,upstreamRegistryUrl]' --output text
+```
+
+Con `gitops_enabled: false`, cloud-provisioner instala su propio Flux (release `flux` en `kube-system`) y lo que
+gestiona a través de él (cluster-autoscaler, keoscluster-controller), igual que en el clúster del cliente.
+
+Si algo falla, copia el error en esta sesión antes de relanzar. Tras un fallo a medias, `--delete-previous` borra el
+clúster local previo, pero los recursos creados en AWS pueden quedar: revisarlos antes de reintentar.
+
+## 6. Validación del clúster
+
+Kubeconfig: si cloud-provisioner no deja uno utilizable, generarlo:
+
+```bash
+export KUBECONFIG="$PWD/kubeconfig-${CLUSTER_NAME}"
+aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION" --profile "$CP_PROFILE" --kubeconfig "$KUBECONFIG"
+```
+
+```bash
+cpaws() { aws --profile "$CP_PROFILE" --region "$AWS_REGION" "$@"; }   # función (en zsh una variable con opciones no se divide en palabras)
+cpaws eks describe-cluster --name "$CLUSTER_NAME" --query 'cluster.[status,version,identity.oidc.issuer]' --output text
+cpaws eks describe-nodegroup --cluster-name "$CLUSTER_NAME" --nodegroup-name "$NODEGROUP_NAME" \
+  --query 'nodegroup.[status,scalingConfig.minSize,scalingConfig.maxSize,scalingConfig.desiredSize,instanceTypes[0]]' --output text
+kubectl get nodes -o wide
+kubectl get pods -A --no-headers | awk '$4!="Running" && $4!="Completed"'          # vacío
+kubectl get pods -A --no-headers | grep -Ei 'ImagePull|ErrImage' || echo "sin errores de pull"
+helm ls -A                                                                          # release flux en kube-system
+kubectl get pods -A --no-headers | grep -Ei 'flux|autoscaler|keoscluster'
+cpaws iam list-open-id-connect-providers --output text
+cpaws route53 list-hosted-zones-by-name --dns-name "$EXTERNAL_DOMAIN" --query 'HostedZones[].[Name,Config.PrivateZone]' --output text
+```
+
+OK si: clúster y nodegroup `ACTIVE`, versión `1.35`, `NODE_QTY` nodos `Ready`, ningún pod fuera de
+`Running`/`Completed`, ningún `ImagePullBackOff` (confirma que la cuenta puede tirar del ECR `$ECR_REGISTRY`),
+release `flux` presente, proveedor OIDC asociado y zona Route53 de `$EXTERNAL_DOMAIN` creada.
+
+## 7. Eliminación de los recursos de AWS
+
+Solo cuando haya que desmontar el entorno, y lo hace el propietario del entorno con su script (entorno conda
+`marketplace`), fuera de esta guía y de la sesión asistida. Perfil `$CP_PROFILE`, región `$AWS_REGION`.
+
+Después de la limpieza, comprobar que no quedan VPC, NAT Gateways, EIP ni volúmenes, y decidir si se eliminan el
+usuario IAM `cloud-provisioner` y la policy de los pasos 1-2 (si ya no van a usarse en la cuenta).

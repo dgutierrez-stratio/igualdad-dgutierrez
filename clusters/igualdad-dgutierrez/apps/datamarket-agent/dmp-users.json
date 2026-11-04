@@ -1,0 +1,79 @@
+{
+    "auditable": true,
+    "description": "",
+    "enable": true,
+    "endDate": null,
+    "gids": [
+        "dev-dmp-consumers-users"
+    ],
+    "name": "datamarket-agent.dev-datastores-users-acl",
+    "services": [
+        {
+            "instances": [
+                {
+                    "acls": [
+                        {
+                            "actionsAllow": [
+                                "Other"
+                            ],
+                            "actionsDeny": [],
+                            "applyFilter": false,
+                            "filter": null,
+                            "jdbc": null,
+                            "name": "rocket.dev-rocket",
+                            "recursive": true,
+                            "resourceType": "impersonator",
+                            "tls": null
+                        },
+                        {
+                            "actionsAllow": [
+                                "Other"
+                            ],
+                            "actionsDeny": [],
+                            "applyFilter": false,
+                            "filter": null,
+                            "jdbc": null,
+                            "name": "genai-api.dev-genai",
+                            "recursive": true,
+                            "resourceType": "impersonator",
+                            "tls": null
+                        }
+                    ],
+                    "sid": "virtualizer.dev-apps"
+                }
+            ],
+            "serviceType": "Virtualizer",
+            "version": "1.1.0-e675936"
+        },
+        {
+         "serviceType":"Rocket",
+         "version":"4.1.0",
+         "instances":[
+            {
+               "sid":"rocket.dev-rocket",
+               "acls":[
+                  {
+                     "resourceType":"Catalog",
+                     "name":"*",
+                     "recursive":true,
+                     "filter":null,
+                     "jdbc":null,
+                     "tls":null,
+                     "applyFilter":false,
+                     "actionsAllow":[
+                        "Manage"
+                     ],
+                     "actionsDeny":[
+
+                     ]
+                  }
+               ]
+            }
+         ]
+      }
+    ],
+    "startDate": null,
+    "tid": "dev",
+    "uids": []
+}
+

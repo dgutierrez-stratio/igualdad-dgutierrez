@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# curl FALSO: registra la llamada y escribe en el fichero de -o un zip ficticio (MOCK_UNIVERSE_ZIP) o un fallo.
+# MOCK_CURL_FAIL=1 -> exit 22; MOCK_CURL_EMPTY=1 -> fichero vacio; MOCK_CURL_BAD=1 -> contenido que no es zip.
+echo "curl $*" >> "${MOCK_LOG:?}"
+out=""; args=("$@"); i=0
+while [[ $i -lt ${#args[@]} ]]; do [[ "${args[$i]}" == -o ]] && out="${args[$((i+1))]}"; i=$((i+1)); done
+[[ "${MOCK_CURL_FAIL:-0}" != 1 ]] || { echo "curl: (22) The requested URL returned error: 404" >&2; exit 22; }
+[[ -n "$out" ]] || exit 0
+if [[ "${MOCK_CURL_EMPTY:-0}" == 1 ]]; then : > "$out"
+elif [[ "${MOCK_CURL_BAD:-0}" == 1 ]]; then echo "no soy un zip" > "$out"
+else cp "${MOCK_UNIVERSE_ZIP:?}" "$out"; fi
+exit 0

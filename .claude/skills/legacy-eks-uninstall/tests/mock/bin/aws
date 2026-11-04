@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# aws FALSO para pruebas offline (cuenta 111111111111, clúster demo-x). Registra cada llamada en $MOCK_LOG. Ignora --query/--output y devuelve el formato final.
+FX="$MOCK_FIXTURES"; echo "aws $*" >> "${MOCK_LOG:-/dev/null}"
+if [[ "${1:-}" == "--version" ]]; then echo "aws-cli/2.99.0 mock"; exit 0; fi
+[[ "$1" == "--profile" ]] && shift 2; REGION=""; [[ "$1" == "--region" ]] && { REGION="$2"; shift 2; }
+svc="$1"; op="$2"; shift 2; all="$*"
+ctx="$FX/context.json"; full="$FX/finder-full.json"
+vf() { [[ "$all" == *"vpc-id,Values=$1"* ]]; }
+DV="$(jq -r .default_vpc.vpc "$ctx")"; CV="$(jq -r .cluster_vpc "$ctx")"
+members() { jq -r --arg p "$1" '(.default_vpc.members + .cluster_vpc_members)|map(select(startswith($p)))|.[]' "$ctx" | tr '\n' '\t'; }
+deleted() { [[ -f "$MOCK_STATE/deleted.lst" ]] && cat "$MOCK_STATE/deleted.lst" || true; }
+case "$svc $op" in
+ "sts get-caller-identity") if [[ "$all" == *"--query Account"* ]]; then echo 111111111111; else jq -n '{Account:"111111111111",Arn:"arn:aws:sts::111111111111:assumed-role/OrganizationAccountAccessRole/sess",UserId:"X"}'; fi ;;
+ "eks describe-cluster") if [[ -f "$MOCK_STATE/eks_gone" ]]; then echo "ResourceNotFoundException" >&2; exit 254; fi
+    jq -n --arg v "$CV" '{cluster:{name:"demo-x",status:"ACTIVE",tags:{"kubernetes.io/cluster/demo-x":"owned"},resourcesVpcConfig:{vpcId:$v},identity:{oidc:{issuer:"https://oidc.eks.eu-west-1.amazonaws.com/id/63BA1279FAA45B570D610883DBA2971C"}}}}' ;;
+ "eks list-clusters") if [[ "$REGION" == eu-west-1 && ! -f "$MOCK_STATE/eks_gone" ]]; then echo "demo-x"; fi ;;
+ "ec2 describe-regions") printf 'eu-west-1\tus-east-1\n' ;;
+ "ec2 describe-vpcs")
+    if [[ "$all" == *"isDefault,Values=true"* ]]; then echo "$DV"
+    elif [[ "$all" == *"isDefault,Values=false"* ]]; then [[ -f "$MOCK_STATE/vpc_gone" ]] || echo "$CV"
+    elif [[ "$all" == *"--vpc-ids"* ]]; then [[ -f "$MOCK_STATE/vpc_gone" ]] && echo 0 || echo 1; fi ;;
+ "ec2 describe-subnets")        if vf "$DV"; then jq -r '.default_vpc.members|map(select(startswith("subnet-")))|join("\t")' "$ctx"; elif [[ -f "$MOCK_STATE/vpc_gone" ]]; then :; else jq -r '.cluster_vpc_members|map(select(startswith("subnet-")))|join("\t")' "$ctx"; fi ;;
+ "ec2 describe-route-tables")   if vf "$DV"; then jq -r '.default_vpc.members|map(select(startswith("rtb-")))|join("\t")' "$ctx"; elif [[ -f "$MOCK_STATE/vpc_gone" ]]; then :; else jq -r '.cluster_vpc_members|map(select(startswith("rtb-")))|join("\t")' "$ctx"; fi ;;
+ "ec2 describe-security-groups") if vf "$DV"; then jq -r '.default_vpc.members|map(select(startswith("sg-")))|join("\t")' "$ctx"; elif [[ -f "$MOCK_STATE/vpc_gone" ]]; then :; else jq -r '.cluster_vpc_members|map(select(startswith("sg-")))|join("\t")' "$ctx"; fi ;;
+ "ec2 describe-network-interfaces") if vf "$DV"; then :; elif [[ -f "$MOCK_STATE/vpc_gone" ]]; then :; else jq -r '.ec2_network_interfaces|join("\t")' "$full"; fi ;;
+ "ec2 describe-nat-gateways")   [[ -f "$MOCK_STATE/vpc_gone" ]] || jq -r '.nat_gateways|join("\t")' "$full" ;;
+ "ec2 describe-instances")      [[ -f "$MOCK_STATE/vpc_gone" ]] || jq -r '.ec2_instances|join("\t")' "$full" ;;
+ "kms list-keys") jq -r '.kms_aws_managed|join("\t")' "$ctx" ;;
+ "kms describe-key") echo "AWS" ;;
+ "route53 list-hosted-zones") if [[ -f "$MOCK_STATE/zones_gone" ]]; then echo '[]'; else jq -c '.zones|to_entries|map([.key,.value])' "$ctx"; fi ;;
+ "iam get-role") jq -n '{Role:{RoleName:"OrganizationAccountAccessRole",Arn:"arn:aws:iam::111111111111:role/OrganizationAccountAccessRole",AssumeRolePolicyDocument:{Version:"2012-10-17",Statement:[{Effect:"Allow",Principal:{AWS:"arn:aws:iam::999999999999:root"},Action:"sts:AssumeRole"}]}}}' ;;
+ "iam list-attached-role-policies") jq -n '{AttachedPolicies:[{PolicyName:"AdministratorAccess",PolicyArn:"arn:aws:iam::aws:policy/AdministratorAccess"}]}' ;;
+ "iam list-roles") echo '["OrganizationAccountAccessRole"]' ;;
+ "iam list-instance-profiles") if [[ -n "${MOCK_LEFTOVER_PROFILE:-}" && ( -n "${MOCK_LEFTOVER_STICKY:-}" || ! -f "$MOCK_STATE/ip_gone" ) ]]; then echo "[\"$MOCK_LEFTOVER_PROFILE\"]"; else echo '[]'; fi ;;
+ *) echo "mock aws: operación no prevista: $svc $op" >&2; exit 99 ;;
+esac

@@ -1,0 +1,215 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  [apps-layer-kit] Minimal S3 requisites for apps-layer-automation (internal bucket + IAM user + access key in
+  Secrets Manager). Subset of Stratio/aws-clusters-automation
+  cloudformation/automations/scripts/cloudformation/template.yaml (InternalS3Bucket,
+  S3StratioAppsIAMUser, S3StratioAppsIAMUserAccessKey, S3StratioAppsSecret and the
+  InternalS3BucketName / S3StratioAppsSecretArn outputs), without Flux KMS, metering, SNS, SES,
+  Bedrock, VPC endpoints, Loki or Thanos.
+  OPTIONAL (EnableBackupsBucket=true, default false): also creates the Stratio platform backups bucket + its IAM user +
+  access key + secret (BackupsS3Bucket, BackupsS3IAMUser, BackupsS3IAMUserAccessKey, BackupsS3Secret and the
+  BackupsS3BucketName / BackupsS3BucketUser / BackupsS3SecretArn outputs, same shape as the reference template),
+  needed to migrate a legacy cluster to GitOps (keos-fleet backups.s3BucketName / s3BucketRegion + BACKUPS_S3_BUNDLE).
+Parameters:
+  ClusterName:
+    Type: String
+    Description: Cluster that owns these resources (tag cluster=<name>; s3-requisites.sh delete checks it)
+  InternalS3BucketName:
+    Type: String
+    AllowedPattern: '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    Description: Globally unique bucket name, e.g. <cluster>-internal-<account>
+  InternalS3BucketUser:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9+=,.@_-]{1,64}$'
+    Description: IAM user (and Secrets Manager secret) name, e.g. <cluster>-s3
+  EnableBackupsBucket:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      "true" ADDS the backups bucket, IAM user, access key and secret to this stack (never replaces or deletes the
+      existing resources). "false" (default) leaves the stack exactly as before.
+  BackupsS3BucketName:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    Description: Globally unique backups bucket name, e.g. <cluster>-backups-<account>. Required (non-empty) only when EnableBackupsBucket=true
+  BackupsS3BucketUser:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^[A-Za-z0-9+=,.@_-]{1,64}$'
+    Description: IAM user (and Secrets Manager secret) name for backups, e.g. <cluster>-backups. Required (non-empty) only when EnableBackupsBucket=true
+Conditions:
+  CreateBackups: !Equals [!Ref EnableBackupsBucket, "true"]
+Rules:
+  BackupsNamesRequired:
+    RuleCondition: !Equals [!Ref EnableBackupsBucket, "true"]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref BackupsS3BucketName, ""]]
+        AssertDescription: BackupsS3BucketName must not be empty when EnableBackupsBucket=true
+      - Assert: !Not [!Equals [!Ref BackupsS3BucketUser, ""]]
+        AssertDescription: BackupsS3BucketUser must not be empty when EnableBackupsBucket=true
+      - Assert: !Not [!Equals [!Ref BackupsS3BucketName, !Ref InternalS3BucketName]]
+        AssertDescription: BackupsS3BucketName must differ from InternalS3BucketName
+      - Assert: !Not [!Equals [!Ref BackupsS3BucketUser, !Ref InternalS3BucketUser]]
+        AssertDescription: BackupsS3BucketUser must differ from InternalS3BucketUser (the secret name would collide)
+# Notes:
+#  - The bucket has DeletionPolicy Retain: deleting the stack does NOT delete it. Use
+#    2-apps-layer-kit/scripts/s3-requisites.sh delete (empties versions + deletes stack + deletes bucket, with confirmation).
+#  - The secret holds the access key by design (Stratio marketplace template does the same); it is the only
+#    channel apps-layer understands besides S3_BUCKET_ACCESS_KEY/S3_BUCKET_SECRET_KEY in the environment.
+#  - No IRSA/AssumeRole: apps-layer only wires static access keys.
+#  - Backups (optional, EnableBackupsBucket=true): activating it on an existing stack is an UPDATE that only ADDS
+#    resources (all with Condition CreateBackups); InternalS3Bucket & co. are untouched. BackupsS3Bucket also has
+#    DeletionPolicy/UpdateReplacePolicy Retain (backups are never deleted by the stack). If the stack is deleted, the IAM
+#    user, its access key and the secret of backups go with it (the bucket and its data stay). Like the internal secret,
+#    the backups secret holds the access key by design (keos-fleet BACKUPS_S3_BUNDLE needs user/pass); apps-layer does not use it.
+Resources:
+  InternalS3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref InternalS3BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Ref InternalS3BucketName
+        - Key: cluster
+          Value: !Ref ClusterName
+  S3StratioAppsIAMUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Ref InternalS3BucketUser
+      Tags:
+        - Key: cluster
+          Value: !Ref ClusterName
+      Policies:
+        - PolicyName: "s3-stratio-apps"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: "s3:ListAllMyBuckets"
+                Resource: "*"
+              - Effect: "Allow"
+                Action: "s3:*"
+                Resource:
+                  - !Sub "arn:aws:s3:::${InternalS3BucketName}"
+                  - !Sub "arn:aws:s3:::${InternalS3BucketName}/*"
+              - Effect: "Deny"
+                NotAction: "s3:*"
+                NotResource:
+                  - !Sub "arn:aws:s3:::${InternalS3BucketName}"
+                  - !Sub "arn:aws:s3:::${InternalS3BucketName}/*"
+  S3StratioAppsIAMUserAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      Status: Active
+      UserName: !Ref S3StratioAppsIAMUser
+  S3StratioAppsSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Ref InternalS3BucketUser
+      Description: !Sub "Access and secret key for IAM user ${InternalS3BucketUser}"
+      Tags:
+        - Key: cluster
+          Value: !Ref ClusterName
+      SecretString: !Sub '{"ACCESS_KEY":"${S3StratioAppsIAMUserAccessKey}","SECRET_KEY":"${S3StratioAppsIAMUserAccessKey.SecretAccessKey}"}'
+  BackupsS3Bucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateBackups
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref BackupsS3BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Ref BackupsS3BucketName
+        - Key: cluster
+          Value: !Ref ClusterName
+  BackupsS3IAMUser:
+    Type: AWS::IAM::User
+    Condition: CreateBackups
+    Properties:
+      UserName: !Ref BackupsS3BucketUser
+      Tags:
+        - Key: cluster
+          Value: !Ref ClusterName
+      Policies:
+        - PolicyName: "s3-backups"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: "s3:ListAllMyBuckets"
+                Resource: "*"
+              - Effect: "Allow"
+                Action: "s3:*"
+                Resource:
+                  - !Sub "arn:aws:s3:::${BackupsS3BucketName}"
+                  - !Sub "arn:aws:s3:::${BackupsS3BucketName}/*"
+              - Effect: "Deny"
+                NotAction: "s3:*"
+                NotResource:
+                  - !Sub "arn:aws:s3:::${BackupsS3BucketName}"
+                  - !Sub "arn:aws:s3:::${BackupsS3BucketName}/*"
+  BackupsS3IAMUserAccessKey:
+    Type: AWS::IAM::AccessKey
+    Condition: CreateBackups
+    Properties:
+      Status: Active
+      UserName: !Ref BackupsS3IAMUser
+  BackupsS3Secret:
+    Type: AWS::SecretsManager::Secret
+    Condition: CreateBackups
+    Properties:
+      Name: !Ref BackupsS3BucketUser
+      Description: !Sub "Access and secret key for IAM user ${BackupsS3BucketUser}"
+      Tags:
+        - Key: cluster
+          Value: !Ref ClusterName
+      SecretString: !Sub '{"ACCESS_KEY":"${BackupsS3IAMUserAccessKey}","SECRET_KEY":"${BackupsS3IAMUserAccessKey.SecretAccessKey}"}'
+Outputs:
+  InternalS3BucketName:
+    Description: Name of the internal S3 bucket
+    Value: !Ref InternalS3BucketName
+  InternalS3BucketUser:
+    Description: IAM user with s3:* on the internal bucket only
+    Value: !Ref InternalS3BucketUser
+  S3StratioAppsSecretArn:
+    Description: ARN of the secret storing access key for the internal S3 bucket (read by s3-requisites.sh env)
+    Value: !Ref S3StratioAppsSecret
+  BackupsS3BucketName:
+    Condition: CreateBackups
+    Description: Name of the Stratio platform backups S3 bucket (keos-fleet backups.s3BucketName)
+    Value: !Ref BackupsS3BucketName
+  BackupsS3BucketUser:
+    Condition: CreateBackups
+    Description: IAM user with s3:* on the backups bucket only (user of keos-fleet BACKUPS_S3_BUNDLE)
+    Value: !Ref BackupsS3BucketUser
+  BackupsS3SecretArn:
+    Condition: CreateBackups
+    Description: ARN of the secret storing access key for the backups S3 bucket (read by s3-requisites.sh env / backups-info)
+    Value: !Ref BackupsS3Secret

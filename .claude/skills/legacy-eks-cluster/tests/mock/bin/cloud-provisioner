@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+echo "cloud-provisioner :: $*" >> "${MOCK_LOG:?}"
+[[ "$1" == version ]] && echo "cloud-provisioner v0.9.8"
+exit 0

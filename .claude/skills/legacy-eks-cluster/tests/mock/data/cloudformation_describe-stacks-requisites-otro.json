@@ -1,0 +1,1 @@
+{"Stacks":[{"StackName":"demo-x-requisites","StackStatus":"CREATE_COMPLETE","Tags":[{"Key":"cluster","Value":"otro-cluster"}],"Outputs":[{"OutputKey":"InternalS3BucketName","OutputValue":"otro-cluster-internal-111111111111"},{"OutputKey":"S3StratioAppsSecretArn","OutputValue":"arn:aws:secretsmanager:eu-west-1:111111111111:secret:otro-cluster-s3-AbCdEf"}]}]}

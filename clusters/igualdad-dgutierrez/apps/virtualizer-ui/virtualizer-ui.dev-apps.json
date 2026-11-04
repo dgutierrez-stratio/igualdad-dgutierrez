@@ -1,0 +1,31 @@
+{
+    "descriptor": {
+        "service": "virtualizer",
+        "model": "virtualizer-ui",
+        "version": "15.1.0"
+    },
+    "deployment": {
+        "general": {
+            "virtualizerServerHost": "admin.igualdad-dgutierrez.desa.int",
+            "serviceId": "virtualizer-ui",
+            "logoutAPI": "https:///oauth2/sign_out?rd=https:///virtualizer-ui/${Application.id}",
+            "resources": {
+                "memLimit": "512",
+                "CPUs": 0.1,
+                "cpuLimit": "1",
+                "MEM": "512"
+            },
+            "virtualizer_ui_external_domain": "igualdad-dgutierrez.desa.int",
+            "virtualizer_ui_tenant": "dev",
+            "namespaces": {
+                "k8sNamespace": "dev-apps"
+            },
+            "dependencies": {
+                "virtualizerMonitorAPI": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Avirtualizer-monitor.dev-apps&host=virtualizer-monitor"
+            },
+            "priorities": {
+                "application": "https://cct-paas-services:8443/v1/priority-classes/metadata?q=applications-normal"
+            }
+        }
+    }
+}

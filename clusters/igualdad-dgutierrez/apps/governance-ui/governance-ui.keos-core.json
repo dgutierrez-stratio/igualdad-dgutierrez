@@ -1,0 +1,36 @@
+{
+    "descriptor": {
+        "service": "governance",
+        "model": "ui-default",
+        "version": "15.1.0"
+    },
+    "deployment": {
+        "settings": {
+            "searcherConfiguration": {
+                "enableSearcher": true
+            }
+        },
+        "general": {
+            "resources": {
+                "podCpuLimit": 0.6,
+                "CPUs": 0.1,
+                "MEM": 512,
+                "podMemoryLimit": 512
+            },
+            "serviceId": "governance-ui",
+            "priorities": {
+                "application": "https://cct-paas-services:8443/v1/priority-classes/metadata?q=applications-normal"
+            },
+            "dependencies": {
+                "searcherApi": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Ase-searcher.keos-core",
+                "dictionaryApi": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Adg-businessglossary-api.keos-core",
+                "searcherManagerApi": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Ase-manager.keos-core",
+                "discoverManagerApi": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Adg-discovery-manager.keos-core"
+            },
+            "k8sNamespace": "keos-core",
+            "namespaces": {
+                "k8sNamespace": "keos-core"
+            }
+        }
+    }
+}

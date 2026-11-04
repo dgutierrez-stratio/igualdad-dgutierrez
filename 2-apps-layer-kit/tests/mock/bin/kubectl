@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# kubectl FALSO (solo lectura) para las pruebas offline.
+echo "kubectl $*" >> "${MOCK_LOG:?}"
+all="$*"
+case "$all" in
+  *"get svc"*) echo -n "nlb-fake-1234.elb.eu-west-1.amazonaws.com" ;;
+  *"get tenant"*) printf 'tenant.capsule.clastix.io/keos\n'; [[ "${MOCK_TENANT_DEV:-0}" == 1 ]] && printf 'tenant.capsule.clastix.io/dev\n' ;;
+  *"get pods -A -l"*) echo '{"items":[]}' ;;
+  *"get pods -A"*) echo "keos-core  dg-x-1  1/1  Running  0  1m" ;;
+  *"exec"*) echo "${MOCK_SSCC:-}" ;;
+  *) ;;
+esac
+exit 0

@@ -1,0 +1,31 @@
+{
+    "descriptor": {
+        "service": "governance",
+        "model": "discovery-mgr-default",
+        "version": "15.1.0"
+    },
+    "deployment": {
+        "settings": {
+            "swaggerEnabled": true
+        },
+        "general": {
+            "serviceId": "dg-discovery-manager",
+            "namespaces": {
+                "k8sNamespace": "keos-core"
+            },
+            "dependencies": {
+                "dictionaryApi": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Adg-businessglossary-api.keos-core"
+            },            
+            "priorities": {
+                "application": "https://cct-paas-services:8443/v1/priority-classes/metadata?q=applications-normal"
+            },
+            "resources": {
+                "podCpuLimit": 1.5,
+                "CPUs": 0.2,
+                "MEM": 1024,
+                "podMemoryLimit": 1024,
+                "DISK": 10000
+            }
+        }
+    }
+}

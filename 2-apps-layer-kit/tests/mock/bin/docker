@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# docker FALSO: registra y no ejecuta nada.
+echo "docker $*" >> "${MOCK_LOG:?}"
+case "${1:-}" in
+  ps) [[ -n "${MOCK_DOCKER_PS:-}" ]] && echo "$MOCK_DOCKER_PS" ;;
+esac
+exit 0

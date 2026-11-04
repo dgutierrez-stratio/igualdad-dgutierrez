@@ -1,0 +1,46 @@
+{
+   "name":"genai-api.dev-genai-virtualizer.dev-apps-virtualizer-acl",
+   "description":"",
+   "auditable":true,
+   "startDate":null,
+   "endDate":null,
+   "enable":true,
+   "uids":[
+      "genai-api.dev-genai"
+   ],
+   "gids":[
+      "dev-stratio-owners",
+      "dev-ai-users",
+      "dev-users",
+      "dev-semantic-users"
+   ],
+   "services":[
+      {
+         "serviceType":"Virtualizer",
+         "version":"1.1.0-e675936",
+         "instances":[
+            {
+               "sid":"virtualizer.dev-apps",
+               "acls":[
+                  {
+                     "resourceType":"impersonator",
+                     "name":"genai-api.dev-genai",
+                     "recursive":true,
+                     "filter":null,
+                     "jdbc":null,
+                     "tls":null,
+                     "applyFilter":false,
+                     "actionsAllow":[
+                        "Other"
+                     ],
+                     "actionsDeny":[
+
+                     ]
+                  }
+               ]
+            }
+         ]
+      }
+   ],
+   "tid":"dev"
+}

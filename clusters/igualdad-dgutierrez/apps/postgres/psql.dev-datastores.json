@@ -1,0 +1,82 @@
+{
+    "descriptor": {
+        "service": "Postgres",
+        "model": "default",
+        "version": "15.1.0"
+    },
+    "deployment": {
+        "general": {
+            "serviceId": "psql",
+            "namespaces": {
+                "k8sNamespace": "dev-datastores"
+            }
+        },
+        "specification": {
+            "postgresql": {
+                "config": {
+                    "checkpoint_completion_target": "0.9",
+                    "effective_cache_size": "1536MB",
+                    "effective_io_concurrency": "300",
+                    "random_page_cost": "1.1",
+                    "shared_buffers": "512MB",
+                    "shared_preload_libraries": "pg_stat_statements,pg_cron",
+                    "wal_buffers": "16MB",
+                    "wal_compression": "on",
+                    "wal_level": "logical",
+                    "client_connection_check_interval": "30s",
+                    "maintenance_work_mem": "128MB",
+                    "tcp_keepalives_count": "3",
+                    "tcp_keepalives_idle": "60",
+                    "tcp_keepalives_interval": "10",
+                    "wal_keep_size": "4GB",
+                    "track_io_timing": "on",
+                    "track_wal_io_timing": "on",
+                    "hot_standby_feedback": "on"
+                }
+            },
+            "podDisruptionBudget": {
+                "global": {
+                    "enable": true
+                }
+            },
+            "storage": {
+                "data": {
+                    "accessModes": [
+                        "ReadWriteOnce"
+                    ],
+                    "resources": {
+                        "requests": {
+                            "storage": "20Gi"
+                        }
+                    }
+                },
+                "enableShmVolume": true,
+                "wal": {
+                    "accessModes": [
+                        "ReadWriteOnce"
+                    ],
+                    "resources": {
+                        "requests": {
+                            "storage": "10Gi"
+                        }
+                    }
+                }
+            },
+            "constraints": {
+                "tolerations": [
+                    
+                ]
+            },
+        "resources": {
+            "limits": {
+                "cpu": 2,
+                "memory": "2048M"
+            },
+            "requests": {
+                "cpu": 0.5,
+                "memory": "512M"
+            }
+        }
+        }
+    }
+}

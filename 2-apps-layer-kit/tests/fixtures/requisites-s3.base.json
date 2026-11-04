@@ -1,0 +1,134 @@
+{
+  "Parameters": {
+    "ClusterName": {
+      "Type": "String",
+      "Description": "Cluster that owns these resources (tag cluster=<name>; s3-requisites.sh delete checks it)"
+    },
+    "InternalS3BucketName": {
+      "Type": "String",
+      "AllowedPattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
+      "Description": "Globally unique bucket name, e.g. <cluster>-internal-<account>"
+    },
+    "InternalS3BucketUser": {
+      "Type": "String",
+      "AllowedPattern": "^[A-Za-z0-9+=,.@_-]{1,64}$",
+      "Description": "IAM user (and Secrets Manager secret) name, e.g. <cluster>-s3"
+    }
+  },
+  "Resources": {
+    "InternalS3Bucket": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BucketName": "InternalS3BucketName",
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "InternalS3BucketName"
+          },
+          {
+            "Key": "cluster",
+            "Value": "ClusterName"
+          }
+        ]
+      }
+    },
+    "S3StratioAppsIAMUser": {
+      "Type": "AWS::IAM::User",
+      "Properties": {
+        "UserName": "InternalS3BucketUser",
+        "Tags": [
+          {
+            "Key": "cluster",
+            "Value": "ClusterName"
+          }
+        ],
+        "Policies": [
+          {
+            "PolicyName": "s3-stratio-apps",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "s3:ListAllMyBuckets",
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "s3:*",
+                  "Resource": [
+                    "arn:aws:s3:::${InternalS3BucketName}",
+                    "arn:aws:s3:::${InternalS3BucketName}/*"
+                  ]
+                },
+                {
+                  "Effect": "Deny",
+                  "NotAction": "s3:*",
+                  "NotResource": [
+                    "arn:aws:s3:::${InternalS3BucketName}",
+                    "arn:aws:s3:::${InternalS3BucketName}/*"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "S3StratioAppsIAMUserAccessKey": {
+      "Type": "AWS::IAM::AccessKey",
+      "Properties": {
+        "Status": "Active",
+        "UserName": "S3StratioAppsIAMUser"
+      }
+    },
+    "S3StratioAppsSecret": {
+      "Type": "AWS::SecretsManager::Secret",
+      "Properties": {
+        "Name": "InternalS3BucketUser",
+        "Description": "Access and secret key for IAM user ${InternalS3BucketUser}",
+        "Tags": [
+          {
+            "Key": "cluster",
+            "Value": "ClusterName"
+          }
+        ],
+        "SecretString": "{\"ACCESS_KEY\":\"${S3StratioAppsIAMUserAccessKey}\",\"SECRET_KEY\":\"${S3StratioAppsIAMUserAccessKey.SecretAccessKey}\"}"
+      }
+    }
+  },
+  "Outputs": {
+    "InternalS3BucketName": {
+      "Description": "Name of the internal S3 bucket",
+      "Value": "InternalS3BucketName"
+    },
+    "InternalS3BucketUser": {
+      "Description": "IAM user with s3:* on the internal bucket only",
+      "Value": "InternalS3BucketUser"
+    },
+    "S3StratioAppsSecretArn": {
+      "Description": "ARN of the secret storing access key for the internal S3 bucket (read by s3-requisites.sh env)",
+      "Value": "S3StratioAppsSecret"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# kubectl FALSO: registra y responde JSON enlatado de solo lectura.
+echo "kubectl :: $*" >> "${MOCK_LOG:?}"
+case "$*" in
+  *"config view"*) echo '{"clusters":[{"cluster":{"server":"https://ABC.eks.amazonaws.com"}}]}' ;;
+  *"get ns -o json"*) echo '{"items":[{"metadata":{"name":"kube-system"}},{"metadata":{"name":"keos-ops"}}]}' ;;
+  *"get ns"*) echo "NAME"; ;;
+  *"get tenant keos"*) echo "${MOCK_TENANT_STATE:-Active}" ;;
+  *"-n keos-cct get pods"*) echo "cct-orchestrator-0   1/1   Running   0   1d" ;;
+  *"-n keos-ingress get svc"*) echo -n "nlb-fake-1234.elb.eu-west-1.amazonaws.com" ;;
+  *"get svc"*) echo '{"items":[{"metadata":{"namespace":"ingress","name":"nginx"},"spec":{"type":"LoadBalancer"}}]}' ;;
+  *"get ingress"*) echo '{"items":[]}' ;;
+  *"get pvc"*) echo '{"items":[{"metadata":{"namespace":"keos-ops","name":"data-0"}}]}' ;;
+  *"get pv"*) echo '{"items":[{"metadata":{"name":"pv-1"},"spec":{"persistentVolumeReclaimPolicy":"Delete"}}]}' ;;
+  *) echo '{"items":[]}' ;;
+esac

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# python FALSO: simula finder.py y remover.py (con estado en $MOCK_STATE). Se invoca como `python -I <script.py> args...`
+FX="$MOCK_FIXTURES"; shift  # -I
+script="$(basename "$1")"; shift
+deleted() { [[ -f "$MOCK_STATE/deleted.lst" ]] && cat "$MOCK_STATE/deleted.lst" || true; }
+case "$script" in
+ finder.py)
+   out=""; while [[ $# -gt 0 ]]; do [[ "$1" == "--output-file" ]] && out="$2"; shift; done
+   echo "finder $*" >> "$MOCK_LOG"
+   jq -n --slurpfile f "$FX/finder-full.json" --rawfile d <(deleted) '($d|split("\n")|map(select(.!=""))) as $del
+     | $f[0] | with_entries(.key as $t | .value |= map(select(. as $i | ($del|index("\($t),\($i)")) == null))) | with_entries(select(.value|length>0))' > "$MOCK_STATE/f.json"
+   if [[ "$(jq 'length' "$MOCK_STATE/f.json")" -gt 0 ]]; then cp "$MOCK_STATE/f.json" "$out"; fi ;;
+ remover.py)
+   json="$1"; shift; dry=0; [[ "$*" == *"--dry-run"* ]] && dry=1
+   echo "remover json=$json dry=$dry" >> "$MOCK_LOG"
+   jq -r 'to_entries[]|.key as $t|.value[]|"\($t),\(.)"' "$json" >> "$MOCK_STATE/remover-received.lst"
+   if [[ $dry == 1 ]]; then jq -r 'to_entries[]|.key as $t|.value[]|"[Dry Run] Would delete \($t): \(.)"' "$json"; echo "Resource deletion process completed in Dry Run mode."; exit 0; fi
+   n=$(cat "$MOCK_STATE/pass" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$MOCK_STATE/pass"
+   if [[ $n -eq 1 ]]; then   # 1ª pasada: todo menos el EKS y lo que depende de él (como en la vida real)
+     jq -r 'to_entries[]|.key as $t|.value[]|select($t!="eks_clusters" and $t!="vpcs" and $t!="subnets" and $t!="ec2_network_interfaces")|"\($t),\(.)"' "$json" >> "$MOCK_STATE/deleted.lst"
+     echo "2026-01-01 00:00:00 [ERROR] Error deleting EKS Cluster demo-x: ResourceInUseException"; echo "Failed to delete the following resources:"; echo "eks_clusters,demo-x"; exit 1
+   else
+     jq -r 'to_entries[]|.key as $t|.value[]|"\($t),\(.)"' "$json" >> "$MOCK_STATE/deleted.lst"; touch "$MOCK_STATE/eks_gone" "$MOCK_STATE/vpc_gone" "$MOCK_STATE/zones_gone" "$MOCK_STATE/ip_gone"
+     echo "All resources deleted successfully."; exit 0
+   fi ;;
+ *) echo "mock python: script no previsto $script" >&2; exit 99 ;;
+esac

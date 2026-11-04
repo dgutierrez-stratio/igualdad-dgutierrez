@@ -1,0 +1,699 @@
+<title>Arquitectura EKS legacy</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100,700;112,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Concepto: plano de ingeniería. Hierarquía de contenedores anidados (cuenta > región > VPC > AZ > subnet),
+   cada recurso es una ficha pulsable; el color indica QUIÉN lo crea, el borde indica SI está verificado. */
+:root{
+  --bg:#f2f5f7; --surf:#ffffff; --surf2:#e9eef2; --ink:#10202b; --mut:#4a5a66; --line:#c8d2d9; --line2:#8da0ad;
+  --S:#0a7c6e; --M:#a45a00; --C:#2a60d4; --K:#7640c4; --A:#59656f; --onc:#ffffff; --focus:#d4380d;
+  --f-disp:"Archivo","Segoe UI",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0d151b; --surf:#16222b; --surf2:#1b2a35; --ink:#e7eef3; --mut:#a0b1be; --line:#2c3e4b; --line2:#58707f;
+  --S:#3fd0bd; --M:#f2ab3c; --C:#7ea7ff; --K:#bd95ff; --A:#a6b2bc; --onc:#0b1218; --focus:#ff9c6e; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0d151b; --surf:#16222b; --surf2:#1b2a35; --ink:#e7eef3; --mut:#a0b1be; --line:#2c3e4b; --line2:#58707f;
+  --S:#3fd0bd; --M:#f2ab3c; --C:#7ea7ff; --K:#bd95ff; --A:#a6b2bc; --onc:#0b1218; --focus:#ff9c6e; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:400 14px/1.5 var(--f-body);margin:0}
+.wrap{max-width:1320px;margin:0 auto;padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1,h2,h3,h4,h5{font-family:var(--f-disp);margin:0;text-wrap:balance;line-height:1.15}
+h1{font-size:clamp(26px,4.4vw,40px);font-weight:800;font-stretch:112%;letter-spacing:-.01em}
+h2{font-size:22px;font-weight:700;margin-bottom:6px}
+h3{font-size:15px;font-weight:700}
+h4{font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--mut)}
+h5{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--mut);margin-bottom:6px}
+p{margin:0}
+code,.mono{font-family:var(--f-mono);font-size:.92em}
+.lede{max-width:78ch;color:var(--mut);margin-top:10px;font-size:15px}
+.meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.meta span{font:500 12px var(--f-mono);border:1px solid var(--line2);border-radius:4px;padding:3px 8px;background:var(--surf)}
+header.top{padding-bottom:6px}
+
+/* pestañas */
+.tabs{display:flex;gap:4px;overflow-x:auto;border-bottom:2px solid var(--line);margin:22px 0 16px;scrollbar-width:thin}
+.tabs button{font:600 14px var(--f-body);color:var(--mut);background:none;border:0;border-bottom:3px solid transparent;margin-bottom:-2px;padding:10px 14px;cursor:pointer;white-space:nowrap}
+.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--ink)}
+button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,th[role=button]:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.pane[hidden]{display:none}
+
+/* leyenda */
+.legend{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;margin-bottom:12px;padding:10px 12px;background:var(--surf);border:1px solid var(--line);border-radius:8px}
+.legend b{font:700 11px var(--f-body);letter-spacing:.07em;text-transform:uppercase;color:var(--mut)}
+.lg{display:inline-flex;align-items:center;gap:6px;font:500 12.5px var(--f-body);color:var(--ink);background:color-mix(in srgb,var(--c) 12%,var(--surf));border:1.5px solid var(--c);border-radius:999px;padding:3px 10px 3px 4px;cursor:pointer}
+.lg[aria-pressed="true"]{background:var(--c);color:var(--onc)}
+.lg i{font:700 11px var(--f-mono);font-style:normal;background:var(--c);color:var(--onc);border-radius:50%;width:18px;height:18px;display:grid;place-items:center}
+.lg[aria-pressed="true"] i{background:var(--onc);color:var(--c)}
+.sw{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--mut)}
+.sw u{display:inline-block;width:26px;height:14px;border:1.5px solid var(--ink);border-radius:3px;background:var(--surf);text-decoration:none}
+.sw u.p{border-style:dashed}.sw u.r{border-style:dotted}
+.sep{width:1px;height:20px;background:var(--line2)}
+.tg{display:inline-flex;gap:6px;align-items:center;font-size:12.5px;color:var(--mut);cursor:pointer}
+.S{--c:var(--S)}.M{--c:var(--M)}.C{--c:var(--C)}.K{--c:var(--K)}.A{--c:var(--A)}
+
+/* mapa */
+.maplay{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;align-items:start}
+@media (min-width:1100px){.maplay{grid-template-columns:minmax(0,1fr) 310px}}
+.map{display:flex;flex-direction:column;gap:14px;min-width:0}
+.box{border:2px solid var(--line2);border-radius:10px;padding:12px;background:var(--surf2);min-width:0}
+.box>h3{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;margin-bottom:10px}
+.box>h3 small{font:400 12px var(--f-mono);color:var(--mut)}
+.row2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+@media (max-width:760px){.row2{grid-template-columns:minmax(0,1fr)}}
+.box.central{border-style:dotted}
+.box.region{border-style:dashed;background:var(--bg)}
+.box.vpc{background:var(--surf2);border-width:2.5px}
+.band{border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--surf);margin-bottom:12px;min-width:0}
+.band>h4{margin-bottom:8px}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+.azgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}
+@media (max-width:900px){.azgrid{grid-template-columns:minmax(0,1fr)}}
+.az{border:2px solid var(--line2);border-radius:8px;padding:8px;background:var(--bg);display:flex;flex-direction:column;gap:8px;min-width:0}
+.az>h4{display:flex;justify-content:space-between}
+.subnet{border:1.5px solid var(--line2);border-radius:6px;padding:8px;min-width:0;display:flex;flex-direction:column;gap:6px}
+.subnet.pub{background:var(--surf)}
+.subnet.priv{background:var(--surf2);border-style:dashed;border-color:var(--ink)}
+.subnet .tag{font:700 10.5px var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+.subnet.priv .chips,.subnet.pub .chips{flex-direction:column}
+.chips.flowrow{flex-direction:row}
+
+:where(.chip){--c:var(--A)}
+.chip{display:grid;grid-template-columns:20px minmax(0,1fr);gap:2px 8px;align-items:start;text-align:left;font:inherit;color:var(--ink);
+  background:color-mix(in srgb,var(--c) 11%,var(--surf));border:1.5px solid var(--c);border-radius:6px;padding:6px 8px;cursor:pointer;min-width:0;max-width:100%}
+.chip:hover{background:color-mix(in srgb,var(--c) 22%,var(--surf))}
+.chip[aria-pressed="true"]{box-shadow:0 0 0 3px var(--focus)}
+.chip .b{font:700 11px var(--f-mono);background:var(--c);color:var(--onc);border-radius:50%;width:20px;height:20px;display:grid;place-items:center;grid-row:span 2}
+.chip .nm{font-weight:600;font-size:13px;line-height:1.25;overflow-wrap:anywhere}
+.chip .sb{font:400 11px/1.3 var(--f-mono);color:var(--mut);overflow-wrap:anywhere}
+.chip.st-p{border-style:dashed;background:color-mix(in srgb,var(--c) 5%,var(--surf))}
+.chip.st-r{border-style:dotted}
+.chip.st-p .nm::after{content:" · previsto";font-weight:400;color:var(--mut);font-size:11px}
+.chip.st-r .nm::after{content:" · referenciado";font-weight:400;color:var(--mut);font-size:11px}
+.chip.wide{width:100%}
+.map[data-hl]:not([data-hl=""]) .chip{opacity:.22}
+.map[data-hl="S"] .chip.S,.map[data-hl="M"] .chip.M,.map[data-hl="C"] .chip.C,.map[data-hl="K"] .chip.K,.map[data-hl="A"] .chip.A{opacity:1}
+.map.onlyv .chip.st-p{display:none}
+.cl{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+
+/* panel de detalle */
+.det{background:var(--surf);border:2px solid var(--ink);border-radius:10px;padding:14px;min-width:0}
+@media (min-width:1100px){.det{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto}}
+@media (max-width:1099px){.det{display:none;position:fixed;left:0;right:0;bottom:0;z-index:20;max-height:58vh;overflow:auto;border-radius:12px 12px 0 0;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-bottom:calc(14px + env(safe-area-inset-bottom,0px))}
+  .det.open{display:block}}
+.det h3{font-size:16px;margin-bottom:6px;overflow-wrap:anywhere}
+.det .pills{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.pill{display:inline-flex;align-items:center;gap:5px;font:600 11.5px var(--f-body);border:1.5px solid var(--c,var(--line2));border-radius:999px;padding:1px 9px;background:color-mix(in srgb,var(--c,var(--line2)) 12%,var(--surf))}
+.det dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 10px;margin:0 0 10px}
+.det dt{color:var(--mut);font-size:12px}
+.det dd{margin:0;overflow-wrap:anywhere;font-size:13px}
+.det .desc{font-size:13px;color:var(--ink);border-top:1px solid var(--line);padding-top:8px}
+.det .x{float:right;font:600 12px var(--f-body);background:none;border:1px solid var(--line2);border-radius:6px;color:var(--ink);padding:2px 8px;cursor:pointer}
+@media (min-width:1100px){.det .x{display:none}}
+.hint{color:var(--mut);font-size:13px}
+
+/* flujos */
+.flows{display:grid;gap:22px}
+.flowcard{background:var(--surf);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
+.flowcard h3{font-size:17px;margin-bottom:2px}
+.flowcard .sub{color:var(--mut);font-size:13px;margin-bottom:10px}
+.scroll{overflow-x:auto;max-width:100%}
+.scroll svg{display:block;min-width:660px;width:100%;height:auto;color:var(--mut)}
+.flowcard ol{margin:10px 0 0;padding:0;list-style:none;display:grid;gap:5px;counter-reset:s}
+.flowcard li{counter-increment:s;display:grid;grid-template-columns:24px minmax(0,1fr);gap:8px;font-size:13px}
+.flowcard li::before{content:counter(s);background:var(--ink);color:var(--surf);border-radius:50%;width:20px;height:20px;display:grid;place-items:center;font:700 11px var(--f-mono);margin-top:1px}
+svg .n rect{fill:color-mix(in srgb,var(--c) 13%,var(--surf));stroke:var(--c);stroke-width:1.6}
+svg .n.p rect{stroke-dasharray:5 3}
+svg .n.r rect{stroke-dasharray:1.5 3}
+svg .n text{fill:var(--ink);font:500 12px var(--f-body)}
+svg .n text.t{font-weight:700}
+svg .n text.m{font:400 10.5px var(--f-mono);fill:var(--mut)}
+svg .ar{stroke:var(--mut);stroke-width:1.6;fill:none}
+svg .ar.d{stroke-dasharray:5 3}
+svg .bd circle{fill:var(--ink)}
+svg .bd text{fill:var(--surf);font:700 11px var(--f-mono);text-anchor:middle}
+svg .lane{fill:var(--mut);font:700 10.5px var(--f-body);letter-spacing:.08em;text-transform:uppercase}
+
+/* fases */
+.tl{display:grid;gap:0;margin:0;padding:0;list-style:none}
+.ph{display:grid;grid-template-columns:90px minmax(0,1fr);gap:0 14px;position:relative;padding-bottom:12px}
+@media (max-width:560px){.ph{grid-template-columns:62px minmax(0,1fr);gap:0 10px}}
+.ph .st{font:700 12px var(--f-mono);text-align:right;padding-top:9px;color:var(--mut)}
+:where(.ph .card){--c:var(--A)}
+.ph .card{border:1.5px solid var(--c);border-left-width:6px;border-radius:8px;background:color-mix(in srgb,var(--c) 8%,var(--surf));padding:8px 12px;min-width:0}
+.ph .card h3{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;font-size:14.5px}
+.ph .card p{font-size:13px;color:var(--mut);margin-top:3px}
+.ph .card ul{margin:5px 0 0;padding-left:18px;font-size:13px}
+.who{font:700 10.5px var(--f-body);letter-spacing:.06em;text-transform:uppercase;color:var(--onc);background:var(--c);border-radius:4px;padding:1px 7px}
+.ph.todo .card{border-style:dashed}
+.grp{font:700 11px var(--f-body);letter-spacing:.09em;text-transform:uppercase;color:var(--mut);margin:14px 0 8px;border-bottom:1px solid var(--line);padding-bottom:4px}
+
+/* catálogo */
+.filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+.filters input,.filters select{font:400 13px var(--f-body);color:var(--ink);background:var(--surf);border:1.5px solid var(--line2);border-radius:6px;padding:6px 8px;min-width:0}
+.filters input{flex:1 1 220px}
+.tw{overflow-x:auto;max-width:100%;border:1px solid var(--line);border-radius:8px;background:var(--surf)}
+table{border-collapse:collapse;width:100%;min-width:980px;font-size:12.5px}
+th,td{text-align:left;padding:6px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+th{position:sticky;top:0;background:var(--surf2);font:700 11px var(--f-body);letter-spacing:.06em;text-transform:uppercase;cursor:pointer;white-space:nowrap;user-select:none}
+th[aria-sort="ascending"]::after{content:" ▲"}th[aria-sort="descending"]::after{content:" ▼"}
+td.id{font:400 11.5px var(--f-mono);overflow-wrap:anywhere;max-width:330px}
+tbody tr{cursor:pointer}tbody tr:hover{background:var(--surf2)}
+.cnt{color:var(--mut);font-size:12.5px;margin:8px 0}
+
+/* compartido */
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.col{border:2px solid var(--line2);border-radius:10px;padding:12px;background:var(--surf);min-width:0}
+.col.acct{border-color:var(--M);background:color-mix(in srgb,var(--M) 6%,var(--surf))}
+.col h3{margin-bottom:4px}.col .sub{font-size:13px;color:var(--mut);margin-bottom:10px}
+.note{border-left:5px solid var(--M);background:color-mix(in srgb,var(--M) 9%,var(--surf));border-radius:6px;padding:10px 12px;margin-top:14px;font-size:13.5px}
+.note b{font-weight:600}
+ul.dep{margin:6px 0 0;padding-left:20px}ul.dep li{margin:3px 0}
+.foot{margin-top:28px;border-top:1px solid var(--line);padding-top:12px;color:var(--mut);font-size:12.5px;display:grid;gap:4px;max-width:110ch}
+@media (prefers-reduced-motion:no-preference){.chip{transition:background .12s}}
+</style>
+
+<div class="wrap">
+<header class="top">
+  <h1>Clúster EKS legacy de Stratio en AWS</h1>
+  <p class="lede">Dónde vive cada pieza de un clúster creado con cloud-provisioner y keos-installer, quién la crea y qué se comparte entre clústeres. Ejemplo real: <b>igualdad-dgutierrez</b>. Pulsa cualquier ficha para ver su detalle.</p>
+  <div class="meta"><span>cuenta 821111360971</span><span>eu-west-1</span><span>EKS 1.35</span><span>cloud-provisioner 0.9.8</span><span>keos-installer 1.4.2</span><span>gitops_enabled: false</span><span>consultado 27-oct-2026 ~10:30 (solo lectura)</span></div>
+</header>
+
+<nav class="tabs" role="tablist" aria-label="Secciones">
+  <button role="tab" id="t-mapa" aria-selected="true" aria-controls="p-mapa">Mapa por ubicación</button>
+  <button role="tab" id="t-flujos" aria-selected="false" aria-controls="p-flujos">Flujos</button>
+  <button role="tab" id="t-fases" aria-selected="false" aria-controls="p-fases">Fases</button>
+  <button role="tab" id="t-catalogo" aria-selected="false" aria-controls="p-catalogo">Catálogo</button>
+  <button role="tab" id="t-compartido" aria-selected="false" aria-controls="p-compartido">Compartido o propio</button>
+</nav>
+
+<!-- ===================== MAPA ===================== -->
+<section class="pane" id="p-mapa" role="tabpanel" aria-labelledby="t-mapa">
+  <div class="legend" aria-label="Leyenda">
+    <b>Lo crea</b>
+    <button class="lg S" data-k="S" aria-pressed="false"><i>S</i>script create-test-vpc.sh</button>
+    <button class="lg M" data-k="M" aria-pressed="false"><i>M</i>manual (aws cli, guía)</button>
+    <button class="lg C" data-k="C" aria-pressed="false"><i>C</i>cloud-provisioner / CAPA</button>
+    <button class="lg K" data-k="K" aria-pressed="false"><i>K</i>keos-installer</button>
+    <button class="lg A" data-k="A" aria-pressed="false"><i>A</i>automático AWS o ajeno</button>
+    <span class="sep"></span>
+    <span class="sw"><u></u>verificado</span><span class="sw"><u class="p"></u>previsto</span><span class="sw"><u class="r"></u>referenciado</span>
+    <span class="sep"></span>
+    <label class="tg" for="onlyv"><input type="checkbox" id="onlyv"> ocultar previstos</label>
+  </div>
+  <p class="hint" style="margin-bottom:12px">Pulsa un color de la leyenda para resaltar lo que crea cada herramienta. Verificado: visto con <code>aws describe/list</code> o <code>kubectl get</code>. Previsto: lo instala <code>keos install</code> y todavía no existe. Referenciado: está en otra cuenta o no se puede comprobar desde la nuestra.</p>
+
+  <div class="maplay">
+  <div class="map" id="map" data-hl="">
+
+    <div class="row2">
+      <div class="box">
+        <h3>Portátil / entorno local <small>/stratio/e/igualdad</small></h3>
+        <div class="chips" data-slot="local"></div>
+      </div>
+      <div class="box central">
+        <h3>Cuenta central 717279725338 <small>ECR · eu-west-1</small></h3>
+        <div class="chips" data-slot="central"></div>
+      </div>
+    </div>
+
+    <div class="box">
+      <h3>Cuenta AWS 821111360971 <small>una cuenta puede alojar varios clústeres</small></h3>
+
+      <div class="band">
+        <h4>Servicios globales de la cuenta (no pertenecen a una región ni a una VPC)</h4>
+        <div class="cols" style="margin-top:8px">
+          <div><h5>IAM</h5><div class="chips" data-slot="giam"></div></div>
+          <div><h5>Route 53</h5><div class="chips" data-slot="r53"></div></div>
+        </div>
+      </div>
+
+      <div class="box region">
+        <h3>Región eu-west-1 <small>Irlanda</small></h3>
+        <div class="band">
+          <h4>Servicios regionales, fuera de la VPC</h4>
+          <div class="chips" style="margin-top:8px" data-slot="reg"></div>
+        </div>
+
+        <div class="box vpc">
+          <h3>VPC igualdad-dgutierrez <small>10.0.0.0/16 · 3 AZ · 3 subnets públicas + 3 privadas</small></h3>
+          <div class="chips" data-slot="vpc"></div>
+          <div class="azgrid">
+            <div class="az"><h4><span>eu-west-1a</span></h4>
+              <div class="subnet pub"><span class="tag">Subnet pública · sale por el IGW</span><div class="chips" data-slot="a-pub"></div></div>
+              <div class="subnet priv"><span class="tag">Subnet privada · sale por el NAT</span><div class="chips" data-slot="a-priv"></div></div></div>
+            <div class="az"><h4><span>eu-west-1b</span></h4>
+              <div class="subnet pub"><span class="tag">Subnet pública · sale por el IGW</span><div class="chips" data-slot="b-pub"></div></div>
+              <div class="subnet priv"><span class="tag">Subnet privada · sale por el NAT de la 1a</span><div class="chips" data-slot="b-priv"></div></div></div>
+            <div class="az"><h4><span>eu-west-1c</span></h4>
+              <div class="subnet pub"><span class="tag">Subnet pública · sale por el IGW</span><div class="chips" data-slot="c-pub"></div></div>
+              <div class="subnet priv"><span class="tag">Subnet privada · sale por el NAT de la 1a</span><div class="chips" data-slot="c-priv"></div></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="box" style="margin-top:12px">
+        <h3>Dentro del clúster Kubernetes <small>corre sobre los 3 nodos de las subnets privadas</small></h3>
+        <div class="cl">
+          <div><h5>Instalado y en marcha (verificado con kubectl y helm)</h5><div class="chips" data-slot="cl-ok"></div></div>
+          <div><h5>Lo instala keos install (previsto según keos.yaml y override_vars)</h5><div class="chips" data-slot="cl-plan"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <aside class="det" id="det" aria-live="polite">
+    <button class="x" id="detx" type="button">Cerrar</button>
+    <div id="detbody"><h3>Detalle del recurso</h3><p class="hint">Elige una ficha del mapa para ver su nombre o ID, ámbito, quién lo crea, con qué se borra y si lo comparten otros clústeres.</p></div>
+  </aside>
+  </div>
+</section>
+
+<!-- ===================== FLUJOS ===================== -->
+<section class="pane" id="p-flujos" role="tabpanel" aria-labelledby="t-flujos" hidden>
+  <h2>Cómo se relacionan las piezas</h2>
+  <p class="hint" style="margin-bottom:14px">Los colores son los de la leyenda del mapa. Línea discontinua del borde: previsto; punteada: referenciado. En pantallas estrechas cada diagrama se desplaza en horizontal.</p>
+  <div class="flows">
+
+    <div class="flowcard"><h3>1 · Quién crea el clúster</h3><p class="sub">Del portátil al EKS, y de ahí a keos-installer.</p>
+      <div class="scroll"><svg id="f1" viewBox="0 0 780 214" role="img" aria-label="cloud-provisioner arranca kind en Docker, kind con CAPA crea los recursos en AWS y el EKS; después keos-installer aplica los servicios sobre ese EKS."></svg></div>
+      <ol>
+        <li><span>El binario descarga del ECR central la imagen de arranque <code>stratio/cloud-provisioner:0.9.8</code> y arranca kind en Docker con <code>--retain</code>.</span></li>
+        <li><span>kind ejecuta CAPI y CAPA con las claves del usuario IAM <code>cloud-provisioner</code>.</span></li>
+        <li><span>CAPA llama a AWS: stack CloudFormation con los roles CAPA, rol de servicio, plano de control EKS, 3 nodegroups, proveedor OIDC y add-ons.</span></li>
+        <li><span>En el EKS quedan flux, cluster-autoscaler, cluster-operator y los controladores CAPI/CAPA (el objeto Cluster figura como Provisioned).</span></li>
+        <li><span>Cloud-provisioner deja <code>keos.yaml</code> y <code>secrets.yml</code>; los pasos 8-12 de la guía preparan Route 53, IRSA, velero, EFS y los ficheros finales.</span></li>
+        <li><span>keos-installer 1.4.2 monta el workspace y aplica los servicios con charts de <code>/helm-15.1</code> (previsto; hay un contenedor en marcha, sin namespaces keos-* aún).</span></li>
+      </ol>
+    </div>
+
+    <div class="flowcard"><h3>2 · Cómo asume un pod un rol de AWS (IRSA)</h3><p class="sub">ServiceAccount, proveedor OIDC y rol con condición <code>sub</code> y <code>aud</code>. Las ServiceAccounts se crean con keos install.</p>
+      <div class="scroll"><svg id="f2" viewBox="0 0 780 224" role="img" aria-label="El pod presenta el token de su ServiceAccount al proveedor OIDC del clúster, STS comprueba sub y aud del rol y entrega credenciales temporales; external-dns llega a Route 53 y velero a S3 y snapshots EBS."></svg></div>
+      <ol>
+        <li><span>El pod recibe un token JWT firmado por el emisor OIDC del clúster, con <code>aud = sts.amazonaws.com</code>, y lo presenta a STS con <code>sts:AssumeRoleWithWebIdentity</code>.</span></li>
+        <li><span>IAM confía en el proveedor OIDC registrado en la cuenta y evalúa la trust policy del rol: solo acepta el <code>sub</code> exacto (<code>system:serviceaccount:kube-system:external-dns</code> o <code>keos-backup:velero-server</code>) y el <code>aud</code>. Verificado en las dos trust policies.</span></li>
+        <li><span>STS devuelve credenciales temporales y el pod solo puede hacer lo que permite la policy del rol: cambiar registros de las 2 zonas, o escribir en el bucket y crear snapshots.</span></li>
+        <li><span>El driver EBS CSI y el EFS CSI no usan IRSA: toman los permisos del rol de nodos <code>eks-nodegroup.cluster-api-provider-aws.sigs.k8s.io</code>, que es de cuenta.</span></li>
+      </ol>
+    </div>
+
+    <div class="flowcard"><h3>3 · Cómo bajan las imágenes</h3><p class="sub">Del nodo al ECR central con pull-through cache. La cuenta central es de otro equipo: se muestra lo referenciado.</p>
+      <div class="scroll"><svg id="f3" viewBox="0 0 780 232" role="img" aria-label="El nodo en subnet privada pide imágenes con prefijo al ECR de la cuenta central a través del NAT; si la imagen no está en caché, el ECR la importa del registro público original. El rol de nodos autoriza y el portátil tira de la misma cuenta con las claves del usuario IAM."></svg></div>
+      <ol>
+        <li><span>containerd del nodo pide la imagen al registro configurado, con prefijo (<code>/docker.io</code>, <code>/quay.io</code>, <code>/ghcr.io</code>, <code>/registry.k8s.io</code>, <code>/public.ecr.aws</code>).</span></li>
+        <li><span>El tráfico sale por el NAT único: no hay VPC endpoints en la VPC (verificado).</span></li>
+        <li><span>El ECR de <code>717279725338</code> sirve la imagen; si no la tiene, la importa del registro original con una regla pull-through (reglas referenciadas: nuestra cuenta tiene 0).</span></li>
+        <li><span>El rol de nodos lleva <code>AmazonEC2ContainerRegistryReadOnly</code> y <code>ecr-pull-through-cache-machinepool</code> (<code>BatchImportUpstreamImage</code>, <code>CreateRepository</code>). Verificado.</span></li>
+        <li><span>El portátil hace lo mismo antes de que existan nodos: imagen de arranque y charts OCI (<code>/helm</code>, <code>/helm-15.1</code>) con las claves del usuario <code>cloud-provisioner</code>.</span></li>
+      </ol>
+    </div>
+
+    <div class="flowcard"><h3>4 · Cómo se publica una aplicación</h3><p class="sub">Todo este flujo es previsto: los NLB y los registros los crea keos install. Hoy no hay balanceadores ni registros (verificado).</p>
+      <div class="scroll"><svg id="f4" viewBox="0 0 780 232" role="img" aria-label="El cliente resuelve el nombre en Route 53, llega a un NLB externo o interno, que reenvía a ingress-nginx en los nodos y de ahí al Service y los pods. external-dns publica los registros en Route 53."></svg></div>
+      <ol>
+        <li><span>El cliente resuelve <code>*.igualdad-dgutierrez.desa.int</code>: zona pública desde internet, zona privada desde dentro de la VPC (sin delegación NS en <code>desa.int</code> todavía).</span></li>
+        <li><span>El registro apunta a un NLB: externo en las subnets públicas (<code>kubernetes.io/role/elb</code>) o interno en las privadas (<code>role/internal-elb</code>). No se instala el AWS Load Balancer Controller (<code>eks_lb_controller: false</code>).</span></li>
+        <li><span>El NLB reenvía por TCP a ingress-nginx en los nodos, que enruta por Host y ruta al Service y a los pods.</span></li>
+        <li><span>external-dns observa los Ingress y escribe los registros en las dos zonas usando su rol IRSA.</span></li>
+      </ol>
+    </div>
+
+    <div class="flowcard"><h3>5 · Cómo se guardan los datos y las copias</h3><p class="sub">PVC a EBS o EFS, y velero a S3. Hoy solo existe la StorageClass <code>keos</code>; no hay volúmenes de PVC.</p>
+      <div class="scroll"><svg id="f5" viewBox="0 0 780 316" role="img" aria-label="Un pod reclama un PVC; la StorageClass keos crea un volumen EBS en la AZ del nodo y la StorageClass de EFS monta el sistema de archivos por el mount target de la AZ. Velero guarda copias en S3 y snapshots de EBS."></svg></div>
+      <ol>
+        <li><span>El pod reclama un PVC. La StorageClass <code>keos</code> (por defecto, <code>ebs.csi.aws.com</code>, <code>WaitForFirstConsumer</code>) crea un volumen EBS en la AZ donde se planifica el pod.</span></li>
+        <li><span>Un volumen EBS solo se monta en nodos de su AZ; EFS no tiene esa restricción porque hay un mount target por subnet privada.</span></li>
+        <li><span>EFS <code>fs-07669d645c149eb57</code> se monta por NFS (puerto 2049) con el SG del clúster; la política del sistema de archivos exige TLS y acceso vía mount target.</span></li>
+        <li><span>velero-server (ns <code>keos-backup</code>) asume su rol IRSA, escribe copias en el bucket S3 y crea snapshots de los volúmenes EBS.</span></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== FASES ===================== -->
+<section class="pane" id="p-fases" role="tabpanel" aria-labelledby="t-fases" hidden>
+  <h2>Fases del aprovisionamiento</h2>
+  <p class="hint" style="margin-bottom:6px">Los pasos son los de <code>1-aws-cluster/GUIA-INSTALACION-LEGACY.md</code>. La barra de color indica quién ejecuta cada paso; las horas son las de creación leídas en AWS (UTC).</p>
+  <div id="tl"></div>
+</section>
+
+<!-- ===================== CATÁLOGO ===================== -->
+<section class="pane" id="p-catalogo" role="tabpanel" aria-labelledby="t-catalogo" hidden>
+  <h2>Catálogo de recursos</h2>
+  <p class="hint" style="margin-bottom:10px">Filtra, ordena por cualquier columna y pulsa una fila para abrir su detalle en el mapa.</p>
+  <div class="filters">
+    <input type="search" id="q" placeholder="Buscar por nombre, ID, servicio…" aria-label="Buscar">
+    <select id="fs" aria-label="Servicio"><option value="">Servicio: todos</option></select>
+    <select id="fa" aria-label="Ámbito"><option value="">Ámbito: todos</option></select>
+    <select id="fk" aria-label="Creado por"><option value="">Creado por: todos</option></select>
+    <select id="fe" aria-label="Estado"><option value="">Estado: todos</option><option value="v">verificado</option><option value="p">previsto</option><option value="r">referenciado</option></select>
+    <select id="fh" aria-label="Compartido"><option value="">Compartido: todos</option><option value="sí">sí</option><option value="parcial">parcial</option><option value="no">no</option></select>
+  </div>
+  <div class="cnt" id="cnt"></div>
+  <div class="tw"><table id="tbl"><thead><tr id="thr"></tr></thead><tbody id="tb"></tbody></table></div>
+</section>
+
+<!-- ===================== COMPARTIDO ===================== -->
+<section class="pane" id="p-compartido" role="tabpanel" aria-labelledby="t-compartido" hidden>
+  <h2>Recursos de la cuenta y recursos del clúster</h2>
+  <p class="hint" style="margin-bottom:12px">Lo que es de cuenta lo usan todos los clústeres EKS que cree cloud-provisioner en ella. Borrarlo al limpiar un clúster rompe a los demás.</p>
+  <div class="two">
+    <div class="col acct"><h3>De cuenta: no borrar al limpiar un clúster</h3><p class="sub">Se crean una vez por cuenta.</p><div id="sh-si"></div></div>
+    <div class="col"><h3>Propios del clúster</h3><p class="sub">Llevan el nombre del clúster o dependen de su VPC, de su OIDC o de sus ServiceAccounts.</p><div id="sh-no"></div></div>
+  </div>
+  <div class="note"><b>Caso mixto.</b> La policy <code>igualdad-dgutierrez-efs-csi</code> es propia, pero está adjunta al rol de nodos, que es de cuenta. Hay que desadjuntarla de ese rol antes de borrarla, y mientras esté adjunta los pods de todos los nodos heredan permisos de EFS. Lo mismo ocurre con <code>ecr-pull-through-cache-machinepool</code>, que es de cuenta.</div>
+  <div class="two" style="margin-top:14px">
+    <div class="col"><h3>Dependencias que suelen bloquear el borrado</h3><ul class="dep">
+      <li>Los NLB y sus ENI impiden borrar subnets y VPC.</li>
+      <li>Los mount targets de EFS impiden borrar subnets; el sistema de archivos se borra después.</li>
+      <li>La zona privada de Route 53 está asociada a la VPC; las zonas con registros de external-dns no se borran vacías.</li>
+      <li>El NAT debe estar borrado antes de liberar su Elastic IP.</li>
+      <li>El bucket de velero debe vaciarse antes de borrarlo (los nombres de bucket son globales).</li>
+      <li>El log group <code>/aws/eks/…/cluster</code> puede sobrevivir al clúster (a revisar).</li>
+    </ul><p class="hint" style="margin-top:8px">La guía deja el borrado (paso 14) al script del propietario del entorno; esta lista son dependencias típicas de AWS, no el orden de ese script.</p></div>
+    <div class="col"><h3>Para reutilizarlo con otro clúster</h3><ul class="dep">
+      <li>Cambia <code>cluster.env</code> y repite los pasos: <code>CLUSTER_NAME</code> da nombre a la VPC, subnets, zonas, roles IRSA, bucket y EFS.</li>
+      <li>El dominio externo sale del nombre: <code>&lt;cluster&gt;.desa.int</code>.</li>
+      <li>La segunda vez en la misma cuenta se omiten el usuario IAM, la policy ECR y el stack CAPA (de cuenta).</li>
+      <li>El bucket de velero lleva la cuenta en el nombre porque los nombres de S3 son globales.</li>
+      <li>El nombre del rol de velero de la PR (<code>role_igualdad-desa-velero</code>) chocaría con otro clúster; aquí es <code>&lt;cluster&gt;-velero</code>.</li>
+      <li>La versión de cloud-provisioner es también el tag de la imagen de arranque en el ECR central: tiene que existir allí.</li>
+    </ul></div>
+  </div>
+</section>
+
+<div class="foot">
+  <p><b>Qué se verificó.</b> Con el perfil <code>cloud-provisioner</code> y solo comandos describe/list/get: EKS, nodegroups, add-ons, VPC, subnets, IGW, NAT, route tables, SG, instancias, IAM (roles, policies, OIDC), Route 53, S3, EFS (mount targets y política), CloudFormation, log group. Con kubectl y helm: namespaces, releases, pods y StorageClasses. En local: docker ps.</p>
+  <p><b>Qué no se pudo verificar.</b> El ECR de la cuenta central (acceso denegado a describe, solo se puede tirar de imágenes), sus reglas pull-through, el contenido de las policies IAM propias (se citan según la guía), el cifrado de los discos de los nodos (describe-volumes devuelve Encrypted=False, aunque el descriptor pide cifrado), y todo lo que instalará keos install. El kubeconfig se generó con <code>aws eks update-kubeconfig</code> en un fichero temporal.</p>
+  <p><b>Matiz respecto a la guía.</b> Los nodos son 3 nodegroups gestionados, uno por AZ (<code>…desa-eks-1-mp-0/1/2</code>, mín 1, máx 2 cada uno), que suman 3 nodos y un máximo de 6; no es un único nodegroup 3/6.</p>
+</div>
+</div>
+
+<script>
+(function(){
+"use strict";
+/* ---------- datos ---------- */
+var CK={S:"Script create-test-vpc.sh",M:"Manual (aws cli / a mano)",C:"cloud-provisioner / CAPA",K:"keos-installer",A:"AWS automático o ajeno"};
+var ST={v:"verificado",p:"previsto",r:"referenciado"};
+var I=[];
+function R(id,slot,k,st,nm,sb,svc,scope,del,sh,d){I.push({id:id,slot:slot,k:k,st:st,nm:nm,sb:sb,svc:svc,scope:scope,del:del,sh:sh,d:d});}
+
+/* Local */
+R("kind","local","C","v","kind: clúster de gestión","igualdad-dgutierrez-control-plane","Docker (local)","Local","docker rm, o --delete-previous al relanzar","no","Contenedor con la imagen cloud-provisioner:0.9.8, en marcha según docker ps. Ejecuta CAPI y CAPA temporales con las claves del usuario IAM cloud-provisioner. Se conserva tras crear el EKS por el flag --retain.");
+R("cpbin","local","M","v","Binario cloud-provisioner 0.9.8","~/src/cloud-provisioner-0.9.8/bin/cloud-provisioner","Binario (Stratio/kind)","Local","borrar el fichero","no","Fork de kind compilado desde el tag 0.9.8. Sin --build-stratio-image descarga la imagen de arranque del ECR central con el mismo tag que el binario.");
+R("kinst","local","K","v","keos-installer 1.4.2","qa.int.stratio.com/stratio/keos-installer:1.4.2","Docker (local)","Local","salir del contenedor","no","Se lanza con docker run montando el workspace en /workspace y el socket de Docker. Hay un contenedor con esa imagen en marcha. Pide la contraseña de secrets.yml (la misma VAULT_PASSWORD de cloud-provisioner). Requiere acceso a qa.int.stratio.com.");
+R("f-desc","local","M","v","Descriptor del clúster","1-aws-cluster/estado/cluster.yaml · cluster.env (raíz) · 1-aws-cluster/estado/igualdad-dgutierrez.json","Ficheros","Local","borrar los ficheros","no","render-cluster.sh genera cluster.yaml (permisos 600, contiene claves: no se sube a git). El JSON lo escribe create-test-vpc.sh con vpc_id, subnets y NAT.");
+R("f-sec","local","C","v","secrets.yml y kubeconfig","secrets.yml · .kube/config","Ficheros","Local","borrar los ficheros","no","Los genera cloud-provisioner. secrets.yml va cifrado con VAULT_PASSWORD. El token del kubeconfig caduca en minutos, por eso se usa uno propio creado con aws eks update-kubeconfig.");
+R("f-keos","local","M","v","keos.yaml y override_vars","keos.yaml · override_vars/igualdad-dgutierrez.yaml","Ficheros","Local","borrar los ficheros","no","keos.yaml lo deja cloud-provisioner y render-keos.sh lo ajusta: flavour production, charts en /helm-15.1, EFS con providers custom y csi-aws. El override lleva el ARN de IRSA de external-dns, el bucket y el rol de velero, los dos LB (externo e interno, NLB) y los exporters de Prometheus.");
+R("p-ig","local","M","v","Perfil igualdad","OrganizationAccountAccessRole asumido","Perfil AWS CLI","Local","editar ~/.aws/config","no","ADMIN_PROFILE: rol de administrador asumido sobre la cuenta 821111360971. Solo se usa para crear el usuario IAM, la policy ECR y la VPC. (El nombre del rol asumido viene del encargo; no se ha consultado.)");
+R("p-cp","local","M","v","Perfil cloud-provisioner","usuario IAM cloud-provisioner","Perfil AWS CLI","Local","editar ~/.aws/credentials","no","Claves del usuario IAM cloud-provisioner. Es el AWS_PROFILE de cloud-provisioner y de los pasos siguientes. Las claves no aparecen aquí.");
+R("scr","local","M","v","Scripts de la guía","1-aws-cluster/{create-test-vpc.sh · render-cluster.sh · render-keos.sh}","Scripts","Local","borrar los ficheros","no","create-test-vpc.sh crea la red; los render-* rellenan las plantillas con cluster.env.");
+
+/* Cuenta central */
+R("ecr","central","A","r","Registro ECR central","717279725338.dkr.ecr.eu-west-1.amazonaws.com","ECR","Regional (otra cuenta)","no es nuestro","sí","Referenciado en cluster.yaml y keos.yaml. Desde nuestra cuenta describe-images y describe-repositories dan AccessDenied: solo se puede tirar de imágenes. Que nuestra cuenta lea el registro lo decide la política de esa cuenta.");
+R("ecrimg","central","A","r","Imagen de arranque","stratio/cloud-provisioner:0.9.8","ECR","Regional (otra cuenta)","no es nuestro","sí","La descarga cloud-provisioner con las claves del usuario IAM antes de que existan los nodos. El tag es la versión del binario.");
+R("ecrch","central","A","r","Charts OCI","/helm (cloud-provisioner) · /helm-15.1 (keos-installer)","ECR","Regional (otra cuenta)","no es nuestro","sí","helm_repository del descriptor. cloud-provisioner usa /helm y keos.yaml usa oci://…/helm-15.1.");
+R("ecrptc","central","A","r","Reglas pull-through cache","docker.io · quay.io · ghcr.io · registry.k8s.io · public.ecr.aws","ECR","Regional (otra cuenta)","no es nuestro","sí","Viven en la cuenta central. En nuestra cuenta hay 0 reglas y 0 repositorios (verificado). Los nodos las usan con la policy ecr-pull-through-cache-machinepool.");
+
+/* IAM */
+R("iamuser","giam","M","v","Usuario cloud-provisioner","user/cloud-provisioner · AdministratorAccess · 1 access key","IAM","Global (cuenta)","paso 14: decidir si se elimina","sí","Creado en el paso 1 con el perfil igualdad. Sus claves van en spec.credentials.aws del descriptor y luego en secrets.yml.");
+R("ecrpol","giam","M","v","Policy ECR pull-through","ecr-pull-through-cache-machinepool","IAM","Global (cuenta)","paso 14: decidir (cuenta)","sí","Paso 2. Permite ecr:BatchImportUpstreamImage y ecr:CreateRepository sobre *. Está adjunta al rol de nodos (verificado) y se referencia en nodegroup_extra_policy_arn.");
+R("capa","giam","C","v","Roles de CAPA (5)","control-plane · controllers · eks-controlplane · eks-nodegroup · nodes (.cluster-api-provider-aws.sigs.k8s.io)","IAM","Global (cuenta)","no borrar (de cuenta)","sí","Creados el 2026-10-26 14:30 UTC por el stack de CloudFormation de CAPA (create_iam: true). El rol eks-nodegroup lo usan los nodos de todos los clústeres y tiene 6 policies: EKSWorkerNode, CNI, ECR ReadOnly, EBS CSI, ecr-pull-through y la de EFS de este clúster.");
+R("capapol","giam","C","v","Policies de CAPA (5)","nodes · controllers · control-plane · csi · controllers-eks","IAM","Global (cuenta)","no borrar (de cuenta)","sí","Policies gestionadas por el mismo stack. Son comunes a todos los clústeres de la cuenta.");
+R("svcrole","giam","C","v","Rol de servicio del EKS","igualdad-dgutierrez-iam-service-role","IAM","Global (cuenta)","al borrar el clúster (CAPA)","no","Trust eks.amazonaws.com, policy AmazonEKSClusterPolicy. Creado el 2026-10-26 14:34 UTC. Es el roleArn del plano de control.");
+R("oidc","giam","C","v","Proveedor OIDC del clúster","oidc.eks.eu-west-1.amazonaws.com/id/EB5B3C4D06DBA4EB2CB7B5D0EADDB458","IAM","Global (cuenta)","al borrar el clúster (a comprobar)","no","Lo asocia CAPA por associate_oidc_provider: true. Es la base de IRSA.");
+R("rolext","giam","M","v","Rol IRSA de external-dns","igualdad-dgutierrez-external-dns (+ policy homónima)","IAM","Global (cuenta)","paso 14 (script del propietario)","no","Paso 9, creado el 2026-10-27 07:31 UTC. Trust: sub = system:serviceaccount:kube-system:external-dns y aud = sts.amazonaws.com (verificado). La policy limita ChangeResourceRecordSets a las 2 zonas (según la guía; no se ha leído).");
+R("rolvel","giam","M","v","Rol IRSA de velero","igualdad-dgutierrez-velero (+ policy homónima)","IAM","Global (cuenta)","paso 14 (script del propietario)","no","Paso 10, creado el 2026-10-27 08:35 UTC. Trust: sub = system:serviceaccount:keos-backup:velero-server y aud = sts.amazonaws.com (verificado). La policy da acceso a S3 del bucket y a snapshots EC2 (según la guía).");
+R("efspol","giam","M","v","Policy EFS CSI","igualdad-dgutierrez-efs-csi","IAM","Global (cuenta)","desadjuntar del rol de nodos y borrar","parcial","Paso 11. Propia del clúster, pero adjunta al rol de nodos compartido: da permisos de EFS a todos los pods de todos los nodos de la cuenta.");
+
+/* Route 53 */
+R("zpub","r53","M","v","Zona pública","igualdad-dgutierrez.desa.int · Z02917533RWGFYFALT83D","Route 53","Global","paso 14","no","Paso 8. Tiene solo los 2 registros por defecto (NS y SOA): external-dns aún no ha escrito. La delegación NS en desa.int queda fuera de la guía.");
+R("zpriv","r53","M","v","Zona privada","igualdad-dgutierrez.desa.int · Z00533042CTBKN4ZVTA4E","Route 53","Global (asociada a la VPC)","paso 14","no","Paso 8, asociada a la VPC del clúster. Resuelve los nombres desde dentro de la VPC. Solo NS y SOA por ahora.");
+R("recs","r53","K","p","Registros de external-dns","un registro por Ingress, en ambas zonas","Route 53","Global","con external-dns o paso 14","no","Los escribirá external-dns con su rol IRSA cuando existan los Ingress. Hoy no hay ninguno.");
+
+/* Regional */
+R("eks","reg","C","v","Plano de control EKS","igualdad-dgutierrez · 1.35 (eks.25) · ACTIVE","EKS","Regional","al borrar el clúster (CAPA)","no","Lo gestiona AWS. Endpoint EB5B3C4D06DBA4EB2CB7B5D0EADDB458.gr7.eu-west-1.eks.amazonaws.com con acceso público (0.0.0.0/0) y privado. Modo de autenticación CONFIG_MAP. Logs: solo api. Usa las 3 subnets privadas y dos SG (el del clúster y el adicional).");
+R("addons","reg","C","v","Add-ons de EKS (4)","vpc-cni v1.20.1 · kube-proxy v1.35.3 · coredns v1.13.2 · aws-ebs-csi-driver v1.64.0","EKS","Regional","al borrar el clúster","no","Los cuatro ACTIVE y sin rol IRSA propio: el driver EBS CSI usa el rol de nodos.");
+R("cfn","reg","C","v","Stack de CloudFormation de CAPA","cluster-api-provider-aws-sigs-k8s-io · CREATE_COMPLETE","CloudFormation","Regional","no borrar (de cuenta)","sí","Crea los roles y policies de CAPA en la cuenta (clusterawsadm). Se crea la primera vez y los demás clústeres lo reutilizan.");
+R("logs","reg","A","v","Log group del plano de control","/aws/eks/igualdad-dgutierrez/cluster","CloudWatch Logs","Regional","a revisar: puede sobrevivir al clúster","no","Lo crea EKS al activar el logging (inferido). Solo el log api está activo; audit, authenticator, controllerManager y scheduler están desactivados.");
+R("efs","reg","M","v","EFS cifrado","fs-07669d645c149eb57 · generalPurpose · bursting","EFS","Regional","paso 14 (tras los mount targets)","no","Paso 11. Nombre igualdad-dgutierrez, cifrado, available. Política del sistema de archivos: solo vía mount target y con TLS (verificada). Tiene 3 mount targets, uno por subnet privada.");
+R("s3","reg","M","v","Bucket de velero","igualdad-dgutierrez-velero-821111360971","S3","Regional (nombre global)","paso 14 (vaciar antes)","no","Paso 10. El nombre lleva la cuenta porque los nombres de bucket son globales. Velero escribirá aquí las copias (previsto).");
+R("ecrl","reg","A","v","ECR local: vacío","0 repositorios · 0 reglas pull-through","ECR","Regional","—","no","Verificado: en nuestra cuenta no hay nada de ECR. Todo está en la cuenta central.");
+
+/* VPC */
+R("vpc","vpc","S","v","VPC","vpc-0a075e6de1228ae1d · 10.0.0.0/16","VPC","Regional","paso 14 (al final)","no","Creada por create-test-vpc.sh. DNS hostnames activado (verificado). Los tags de subnet kubernetes.io/role/elb y internal-elb orientan a los NLB.");
+R("igw","vpc","S","v","Internet Gateway","igw-0360890024ec20e4b","VPC","VPC","paso 14","no","Da salida e entrada a las subnets públicas.");
+R("rtpub","vpc","S","v","Route table pública","rtb-018b18ffea7901770 · 0.0.0.0/0 → igw","VPC","VPC","paso 14","no","3 asociaciones: las 3 subnets públicas.");
+R("rtpriv","vpc","S","v","Route tables privadas (3)","rtb-06e54f47351a78b05 · rtb-0916153c804bf148d · rtb-0ab323b342d9d9b21 · 0.0.0.0/0 → nat","VPC","VPC","paso 14","no","private-1, private-2 y private-3. Todas salen por el mismo NAT.");
+R("rtmain","vpc","A","v","Route table principal","rtb-038438efa290a8c91","VPC","VPC","con la VPC","no","La crea AWS con la VPC; sin nombre ni rutas a internet.");
+R("sgcl","vpc","A","v","SG del clúster EKS","eks-cluster-sg-igualdad-dgutierrez-1219261701 · sg-0ce1c9a4f65c630c0","EC2 / EKS","VPC","al borrar el clúster","no","Lo crea EKS. Lo usan los nodos gestionados y, por el paso 11, los mount targets de EFS (admite el tráfico entre sus miembros).");
+R("sgnode","vpc","C","v","SG adicional","igualdad-dgutierrez-node-eks-additional · sg-0c8481b48acedba99","EC2","VPC","al borrar el clúster (CAPA)","no","Es el securityGroupIds del plano de control, creado por CAPA.");
+R("sgdef","vpc","A","v","SG default de la VPC","sg-0a9913a558642d76a","EC2","VPC","con la VPC","no","Lo crea AWS con la VPC.");
+R("nlbe","vpc","K","p","NLB externo","lo crea ingress-nginx (Service LoadBalancer) · subnets públicas","ELB v2 (NLB)","Regional (subnets públicas)","al borrar el Service o paso 14","no","ingress_external_lb: true, abierto a 0.0.0.0/0 (ingress_external_access_cidrs). Hoy no hay ningún balanceador en la VPC (verificado).");
+R("nlbi","vpc","K","p","NLB interno","lo crea ingress-nginx · subnets privadas","ELB v2 (NLB)","Regional (subnets privadas)","al borrar el Service o paso 14","no","ingress_internal_lb: true con anotaciones aws-load-balancer-internal, tipo nlb y cross-zone activado.");
+R("ebsp","vpc","K","p","Volúmenes EBS de los PVC","gp3 · en la AZ del nodo que monta el PVC","EBS","AZ","al borrar el PVC (reclaim Delete)","no","StorageClass keos (ebs.csi.aws.com, Delete, WaitForFirstConsumer). Hoy no hay volúmenes etiquetados del clúster (verificado).");
+
+/* AZ a */
+R("s-a-pub","a-pub","S","v","public-1 · 10.0.2.0/24","subnet-08fa98c333a31c936 · elb=1","VPC","Subnet (AZ a)","paso 14","no","Pública (MapPublicIpOnLaunch true). Tag kubernetes.io/role/elb=1: aquí irá el NLB externo. Aloja el NAT.");
+R("nat","a-pub","S","v","NAT Gateway (único)","nat-04533864682cb3a58","VPC","Subnet (AZ a)","paso 14","no","Estado available. Es el único de la VPC (VPC_NAT_MODE=single): las 3 route tables privadas salen por él. Si cae la AZ a, las privadas de b y c pierden salida a internet.");
+R("eip","a-pub","S","v","Elastic IP del NAT","eipalloc-01c1b8c694d075365 · 34.250.28.118","EC2","Regional","paso 14 (liberar tras el NAT)","no","IP pública de salida de todo el clúster: úsala para listas blancas.");
+R("s-a-priv","a-priv","S","v","private-1 · 10.0.1.0/24","subnet-0dcdd4482bd04e871 · internal-elb=1","VPC","Subnet (AZ a)","paso 14","no","Privada. Tag kubernetes.io/role/internal-elb=1. Es una de las 3 subnets del descriptor y del EKS.");
+R("ng0","a-priv","C","v","Nodegroup mp-0","cluster-igualdad-dgutierrez_desa-eks-1-mp-0 · mín 1 · máx 2","EKS (managed nodegroup + ASG)","AZ","al borrar el clúster (CAPA)","no","m6a.4xlarge, Bottlerocket x86_64, ON_DEMAND, ACTIVE. Uno por AZ; juntos son desa-eks-1 (3 nodos, máx 6).");
+R("n-a","a-priv","A","v","Nodo EC2","i-0b705e6d7ed9581fd · ip-10-0-1-239","EC2","AZ","con el nodegroup","no","Lo lanza el ASG del nodegroup. Discos del nodo: 100 GiB gp3 (datos) y 2 GiB gp3 (SO); describe-volumes indica Encrypted=False.");
+R("mt-a","a-priv","M","v","Mount target EFS","fsmt-037e31d05a78d1574","EFS","Subnet (AZ a)","con el EFS (paso 14)","no","Paso 11, available. Lleva el SG del clúster.");
+/* AZ b */
+R("s-b-pub","b-pub","S","v","public-2 · 10.0.4.0/24","subnet-0bdb45b70c039e26d · elb=1","VPC","Subnet (AZ b)","paso 14","no","Pública, tag kubernetes.io/role/elb=1.");
+R("s-b-priv","b-priv","S","v","private-2 · 10.0.3.0/24","subnet-0a05314301284cb95 · internal-elb=1","VPC","Subnet (AZ b)","paso 14","no","Privada, tag kubernetes.io/role/internal-elb=1.");
+R("ng1","b-priv","C","v","Nodegroup mp-1","cluster-igualdad-dgutierrez_desa-eks-1-mp-1 · mín 1 · máx 2","EKS (managed nodegroup + ASG)","AZ","al borrar el clúster (CAPA)","no","Mismas características que mp-0, en la subnet private-2.");
+R("n-b","b-priv","A","v","Nodo EC2","i-07d33a2a272a96c1b · ip-10-0-3-150","EC2","AZ","con el nodegroup","no","Lo lanza el ASG del nodegroup mp-1.");
+R("mt-b","b-priv","M","v","Mount target EFS","fsmt-0a78135a808cd2843","EFS","Subnet (AZ b)","con el EFS (paso 14)","no","Paso 11, available.");
+/* AZ c */
+R("s-c-pub","c-pub","S","v","public-3 · 10.0.6.0/24","subnet-0373498396531362b · elb=1","VPC","Subnet (AZ c)","paso 14","no","Pública, tag kubernetes.io/role/elb=1.");
+R("s-c-priv","c-priv","S","v","private-3 · 10.0.5.0/24","subnet-0913bcf7fc2687a6e · internal-elb=1","VPC","Subnet (AZ c)","paso 14","no","Privada, tag kubernetes.io/role/internal-elb=1.");
+R("ng2","c-priv","C","v","Nodegroup mp-2","cluster-igualdad-dgutierrez_desa-eks-1-mp-2 · mín 1 · máx 2","EKS (managed nodegroup + ASG)","AZ","al borrar el clúster (CAPA)","no","Mismas características que mp-0, en la subnet private-3.");
+R("n-c","c-priv","A","v","Nodo EC2","i-0b17c67cb2f2a122b · ip-10-0-5-244","EC2","AZ","con el nodegroup","no","Lo lanza el ASG del nodegroup mp-2.");
+R("mt-c","c-priv","M","v","Mount target EFS","fsmt-049abb388d46923f0","EFS","Subnet (AZ c)","con el EFS (paso 14)","no","Paso 11, available.");
+
+/* Clúster: verificado */
+R("k-flux","cl-ok","C","v","flux2 2.7.5","kube-system · chart flux2-2.17.2 · helm, kustomize y source controller","Kubernetes (Helm)","Clúster","con el clúster","no","Flux propio de cloud-provisioner (gitops_enabled: false). Gestiona cluster-autoscaler y cluster-operator.");
+R("k-ca","cl-ok","C","v","cluster-autoscaler 1.35.0","kube-system · chart 9.59.0 · 2 pods","Kubernetes (Helm)","Clúster","con el clúster","no","Escala los nodegroups dentro de sus mín y máx (1 a 2 cada uno).");
+R("k-co","cl-ok","C","v","cluster-operator 0.7.4","kube-system · keoscluster-controller-manager ×2","Kubernetes (Helm)","Clúster","con el clúster","no","Controlador del objeto KeosCluster.");
+R("k-cm","cl-ok","C","v","cert-manager v1.21.2","namespace cert-manager · 3 pods","Kubernetes (Helm)","Clúster","con el clúster","no","");
+R("k-cal","cl-ok","C","v","Calico: tigera-operator v3.31.7","namespaces tigera-operator y calico-system · calico-node ×3","Kubernetes (Helm)","Clúster","con el clúster","no","Calico en los 3 nodos junto al CNI de AWS (aws-node).");
+R("k-capi","cl-ok","C","v","Controladores CAPI y CAPA","capi-system · capa-system · capi-kubeadm-bootstrap · capi-kubeadm-control-plane · ns cluster-igualdad-dgutierrez","Kubernetes","Clúster","con el clúster","no","Corren dentro del EKS. El objeto Cluster igualdad-dgutierrez figura como Provisioned.");
+R("k-add","cl-ok","C","v","Pods de los add-ons","aws-node · kube-proxy · coredns ×2 · ebs-csi-controller ×2 + node ×3 · node-configurer ×3","Kubernetes","Clúster","con el clúster","no","Todos los pods listados estaban en Running.");
+R("k-sc","cl-ok","C","v","StorageClass keos y gp2","keos (por defecto) · gp2","Kubernetes","Clúster","con el clúster","no","keos usa ebs.csi.aws.com, WaitForFirstConsumer, expansión permitida. gp2 es la clásica en el árbol de Kubernetes.");
+
+/* Clúster: previsto */
+R("p-ing","cl-plan","K","p","ingress-nginx","2 Services LoadBalancer: externo e interno","Kubernetes (keos)","Clúster","con keos o al borrar el Service","no","Según override_vars: ingress_external_lb e ingress_internal_lb en true. Crea los NLB. No existe aún.");
+R("p-dns","cl-plan","K","p","external-dns","SA kube-system/external-dns → rol IRSA","Kubernetes (keos)","Clúster","con keos","no","El override trae el ARN del rol. La ServiceAccount todavía no existe (kubectl get sa devuelve NotFound).");
+R("p-vel","cl-plan","K","p","velero","namespace keos-backup · SA velero-server","Kubernetes (keos)","Clúster","con keos","no","velero_storage_provider aws, IRSA activado, bucket igualdad-dgutierrez-velero-821111360971 en eu-west-1.");
+R("p-efs","cl-plan","K","p","Driver EFS CSI y StorageClass EFS","providers custom y csi-aws · efs-igualdad-dgutierrez · permisos 700","Kubernetes (keos)","Clúster","con keos","no","keos.yaml declara el EFS fs-07669d645c149eb57. Usa el rol de nodos, no IRSA. Si se añade tras instalar: keos system-services --tags aws-csi.");
+R("p-obs","cl-plan","K","p","Exporters de Prometheus","blackbox · pushgateway · ldap-query · certificates","Kubernetes (keos)","Clúster","con keos","no","Activados en el override. El log del último intento (09:15) muestra monitoring/prometheus-crds. No hay namespaces keos-* ni de monitorización todavía.");
+R("p-keos","cl-plan","K","p","Objeto keos, PKI y políticas de red","namespace keos-ops · tareas pki y security/network-policies","Kubernetes (keos)","Clúster","con keos","no","Tareas vistas en el log de keos-installer (precheck, pki, network-policies, postinstall). La guía cita keos edit keos -n keos-ops.");
+
+/* ---------- utilidades ---------- */
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+function $(s,r){return (r||document).querySelector(s);}
+function $$(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s));}
+var byId={};I.forEach(function(x){byId[x.id]=x;});
+function store(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v);}catch(e){return null;}}
+
+/* ---------- mapa ---------- */
+var subnetIds={"s-a-pub":1,"s-b-pub":1,"s-c-pub":1,"s-a-priv":1,"s-b-priv":1,"s-c-priv":1};
+I.forEach(function(x){
+  var slot=$('[data-slot="'+x.slot+'"]');if(!slot)return;
+  var b=document.createElement("button");b.type="button";
+  b.className="chip "+x.k+" st-"+x.st+(subnetIds[x.id]?" wide":"");
+  b.setAttribute("data-id",x.id);b.setAttribute("aria-pressed","false");
+  b.title=CK[x.k]+" · "+ST[x.st]+" · "+x.nm;
+  b.innerHTML='<span class="b" aria-hidden="true">'+x.k+'</span><span class="nm">'+esc(x.nm)+'</span><span class="sb">'+esc(x.sb)+'</span>';
+  slot.appendChild(b);
+});
+var det=$("#det"),detb=$("#detbody"),cur=null;
+function show(id,scroll){
+  var x=byId[id];if(!x)return;cur=id;
+  $$(".chip").forEach(function(c){c.setAttribute("aria-pressed",c.getAttribute("data-id")===id?"true":"false");});
+  detb.innerHTML='<h3>'+esc(x.nm)+'</h3>'+
+   '<div class="pills"><span class="pill '+x.k+'">'+x.k+' · '+esc(CK[x.k])+'</span><span class="pill">'+esc(ST[x.st])+'</span></div>'+
+   '<dl><dt>Servicio</dt><dd>'+esc(x.svc)+'</dd><dt>Nombre / ID</dt><dd class="mono">'+esc(x.sb)+'</dd><dt>Ámbito</dt><dd>'+esc(x.scope)+'</dd><dt>Se borra con</dt><dd>'+esc(x.del)+'</dd><dt>Compartido entre clústeres</dt><dd>'+esc(x.sh)+'</dd></dl>'+
+   (x.d?'<p class="desc">'+esc(x.d)+'</p>':'');
+  det.classList.add("open");
+  if(scroll){var m=$('.chip[data-id="'+id+'"]');if(m&&m.scrollIntoView)m.scrollIntoView({block:"center"});}
+}
+$("#map").addEventListener("click",function(e){var c=e.target.closest(".chip");if(c)show(c.getAttribute("data-id"));});
+$("#detx").addEventListener("click",function(){det.classList.remove("open");$$(".chip").forEach(function(c){c.setAttribute("aria-pressed","false");});});
+$$(".lg").forEach(function(b){b.addEventListener("click",function(){
+  var on=b.getAttribute("aria-pressed")==="true";
+  $$(".lg").forEach(function(o){o.setAttribute("aria-pressed","false");});
+  if(!on)b.setAttribute("aria-pressed","true");
+  $("#map").setAttribute("data-hl",on?"":b.getAttribute("data-k"));
+});});
+$("#onlyv").addEventListener("change",function(e){$("#map").classList.toggle("onlyv",e.target.checked);});
+
+/* ---------- flujos (SVG) ---------- */
+var NS="http://www.w3.org/2000/svg";
+function el(n,a,p){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e;}
+function flow(id,nodes,arrows,lanes){
+  var svg=$("#"+id);
+  var d=el("defs",{},svg),m=el("marker",{id:id+"a",viewBox:"0 0 10 10",refX:"9",refY:"5",markerWidth:"7",markerHeight:"7",orient:"auto-start-reverse"},d);
+  el("path",{d:"M0,0 L10,5 L0,10 z",fill:"currentColor"},m);
+  (lanes||[]).forEach(function(l){var t=el("text",{x:l[1],y:l[2],"class":"lane"},svg);t.textContent=l[0];});
+  arrows.forEach(function(a){
+    if(a[6])el("path",{d:a[6],"class":"ar"+(a[5]?" d":""),"marker-end":"url(#"+id+"a)"},svg);
+    else el("line",{x1:a[0],y1:a[1],x2:a[2],y2:a[3],"class":"ar"+(a[5]?" d":""),"marker-end":"url(#"+id+"a)"},svg);
+    var g=el("g",{"class":"bd"},svg),cx=(a[0]+a[2])/2,cy=(a[1]+a[3])/2;
+    el("circle",{cx:cx,cy:cy,r:"10"},g);var t=el("text",{x:cx,y:cy+4},g);t.textContent=a[4];
+  });
+  nodes.forEach(function(n){
+    var g=el("g",{"class":"n "+n.k+(n.s?" "+n.s:"")},svg);
+    el("rect",{x:n.x,y:n.y,width:n.w||160,height:n.h||60,rx:"8"},g);
+    n.t.forEach(function(s,i){
+      var t=el("text",{x:n.x+10,y:n.y+19+i*15,"class":i===0?"t":(i===2||s.charAt(0)==="~"?"m":"")},g);
+      t.textContent=s.charAt(0)==="~"?s.slice(1):s;
+    });
+  });
+}
+/* 1 aprovisionamiento */
+flow("f1",[
+ {x:10,y:24,k:"M",t:["Portátil","cloud-provisioner","0.9.8 · perfil AWS"]},
+ {x:205,y:24,k:"C",t:["kind en Docker","CAPI + CAPA temporales","--retain"]},
+ {x:400,y:24,k:"A",t:["APIs de AWS","CloudFormation · IAM","EC2 · EKS"]},
+ {x:595,y:24,k:"C",t:["EKS igualdad-dgutierrez","3 nodegroups · OIDC","add-ons EKS"],w:175},
+ {x:595,y:134,k:"C",t:["flux · autoscaler","cluster-operator","CAPI/CAPA en el EKS"],w:175},
+ {x:205,y:134,k:"K",s:"p",t:["keos-installer 1.4.2","contenedor Docker","charts /helm-15.1"]},
+ {x:10,y:134,k:"M",t:["keos.yaml","secrets.yml","override_vars"]}
+],[
+ [170,54,205,54,1],[365,54,400,54,2],[560,54,595,54,3],[682,84,682,134,4],[170,164,205,164,5],[365,164,595,164,6,1]
+],[["en tu portátil",10,14],["en la cuenta AWS",400,14]]);
+/* 2 IRSA */
+flow("f2",[
+ {x:10,y:24,k:"K",s:"p",t:["Pod external-dns","SA kube-system/","external-dns"]},
+ {x:205,y:24,k:"C",t:["Proveedor OIDC","oidc.eks…/id/EB5B3C4D","(IAM, de este clúster)"]},
+ {x:400,y:24,k:"M",t:["Rol …-external-dns","condición sub + aud","aud sts.amazonaws.com"]},
+ {x:595,y:24,k:"M",t:["Route 53","zona pública y privada","cambia registros"]},
+ {x:10,y:136,k:"K",s:"p",t:["Pod velero-server","SA keos-backup/","velero-server"]},
+ {x:205,y:136,k:"C",t:["Proveedor OIDC","el mismo del clúster",""]},
+ {x:400,y:136,k:"M",t:["Rol …-velero","condición sub + aud","aud sts.amazonaws.com"]},
+ {x:595,y:136,k:"M",t:["S3 + snapshots EBS","bucket de velero","y copias de volúmenes"]}
+],[
+ [170,54,205,54,1],[365,54,400,54,2],[560,54,595,54,3],[170,166,205,166,1],[365,166,400,166,2],[560,166,595,166,3]
+],[["external-dns",10,14],["velero",10,126]]);
+/* el 3 va sobre la flecha rol → recurso */
+/* 3 imágenes */
+flow("f3",[
+ {x:10,y:24,k:"C",t:["Nodo (containerd)","subnet privada","Bottlerocket"]},
+ {x:205,y:24,k:"S",t:["NAT Gateway","nat-0453…58","sin VPC endpoints"]},
+ {x:400,y:24,k:"A",s:"r",t:["ECR central","717279725338","/docker.io /quay.io …"]},
+ {x:595,y:24,k:"A",s:"r",t:["Registros originales","docker.io · quay.io","ghcr.io, registry.k8s.io"],w:175},
+ {x:10,y:148,k:"A",t:["Rol de nodos","ECR ReadOnly +","policy pull-through"]},
+ {x:400,y:148,k:"M",t:["Portátil","imagen de arranque","charts OCI"]}
+],[
+ [170,54,205,54,1],[365,54,400,54,2],[560,54,595,54,3,1],[90,148,90,84,4],[480,148,480,84,5]
+],[["en la cuenta 821111360971",10,14],["en la cuenta central",400,14]]);
+/* 4 publicar app */
+flow("f4",[
+ {x:10,y:24,k:"A",t:["Cliente","navegador / API","internet o VPC"]},
+ {x:205,y:24,k:"M",t:["Route 53","zona pública / privada","zonas del clúster"],w:170},
+ {x:420,y:24,k:"K",s:"p",t:["NLB externo / interno","públicas / privadas","TCP"],w:170},
+ {x:625,y:24,k:"K",s:"p",t:["ingress-nginx","pods en los nodos","Host y ruta"],w:145},
+ {x:205,y:148,k:"K",s:"p",t:["external-dns","observa Ingress","rol IRSA"],w:170},
+ {x:625,y:148,k:"C",t:["Service → pods","de la aplicación","en subnets privadas"],w:145}
+],[
+ [170,54,205,54,1],[375,54,420,54,2],[590,54,625,54,3],[290,148,290,84,4],[697,84,697,148,3]
+],[["en la cuenta AWS",205,14],["dentro del clúster",625,14]]);
+/* 5 almacenamiento */
+flow("f5",[
+ {x:10,y:90,k:"C",t:["Pod con PVC","nodo en una AZ","la elige el scheduler"]},
+ {x:205,y:30,k:"C",t:["StorageClass keos","ebs.csi.aws.com","WaitForFirstConsumer"],w:165},
+ {x:205,y:150,k:"K",s:"p",t:["StorageClass EFS","efs-igualdad-dgutierrez","driver EFS CSI"],w:165},
+ {x:400,y:30,k:"K",s:"p",t:["Volumen EBS gp3","uno por PVC","en la AZ del nodo"],w:175},
+ {x:400,y:150,k:"M",t:["EFS fs-07669d64…","cifrado · solo TLS","mount target por AZ"],w:175},
+ {x:10,y:236,k:"K",s:"p",t:["velero-server","ns keos-backup","rol IRSA"]},
+ {x:205,y:236,k:"M",t:["Bucket S3","igualdad-dgutierrez-","velero-821111360971"],w:165},
+ {x:400,y:236,k:"K",s:"p",t:["Snapshots EBS","de los volúmenes","ec2:CreateSnapshot"],w:175}
+],[
+ [170,108,205,60,1],[170,128,205,180,3],[370,60,400,60,2],[370,180,400,180,3],[170,266,205,266,4],[90,306,487,306,4,0,"M90 296 V306 H487 V298"]
+],[["EBS (por AZ)",205,20],["EFS (regional)",205,140],["copias de seguridad",10,226]]);
+
+/* ---------- fases ---------- */
+var P=[
+ ["Tú · terminal","M","Paso 0","Preparación","Binario cloud-provisioner 0.9.8, variables de cluster.env, docker en marcha y VAULT_PASSWORD solo en tu terminal.",[]],
+ ["Tú · perfil igualdad","M","Pasos 1 y 2","Usuario IAM y policy ECR","Usuario cloud-provisioner con AdministratorAccess y su access key; policy ecr-pull-through-cache-machinepool. Una vez por cuenta.",[]],
+ ["Tú · lectura","M","Paso 2b","Comprobar acceso al ECR central","docker login y manifest inspect de la imagen de arranque en la cuenta 717279725338. Detecta en segundos un permiso que faltaría al cabo de minutos.",[]],
+ ["Script","S","Paso 3","VPC, subnets, IGW, NAT y route tables","create-test-vpc.sh con el perfil cloud-provisioner. Escribe 1-aws-cluster/estado/igualdad-dgutierrez.json con los IDs.",["1 VPC 10.0.0.0/16, 1 IGW","3 públicas + 3 privadas en 3 AZ con sus tags elb","1 NAT único + 1 EIP, 1 route table pública y 3 privadas"]],
+ ["Tú · local","M","Paso 4","Generar cluster.yaml","render-cluster.sh une la plantilla, cluster.env, el JSON de la VPC y las claves. Resultado con permisos 600.",[]],
+ ["cloud-provisioner","C","Paso 5","Crear el clúster (lo lanzas tú)","create cluster --retain --delete-previous. Dura decenas de minutos.",["Stack CloudFormation y roles CAPA, 2026-10-26 14:30 UTC","Rol de servicio del EKS, 14:34 UTC","Plano de control EKS 1.35, 3 nodegroups, OIDC, add-ons","Flux, cluster-autoscaler, cluster-operator y controladores CAPI/CAPA en el EKS","Deja secrets.yml y keos.yaml"]],
+ ["Tú · lectura","M","Pasos 6 y 7","Validar y derivar variables","Clúster y nodegroups ACTIVE, nodos Ready, ningún pod fuera de Running, proveedor OIDC. Se leen VPC, subnets, SG, OIDC y zonas.",[]],
+ ["Tú · perfil cloud-provisioner","M","Paso 8","Zonas Route 53","Una zona pública y otra privada asociada a la VPC.",[]],
+ ["Tú · perfil cloud-provisioner","M","Pasos 9 y 10","Roles IRSA, bucket de velero","Rol y policy de external-dns (2026-10-27 07:31 UTC); bucket y rol de velero (08:35 UTC).",[]],
+ ["Tú · perfil cloud-provisioner","M","Paso 11","EFS","EFS cifrado, 3 mount targets con el SG del clúster, política del sistema de archivos y policy de EFS CSI adjunta al rol de nodos (de cuenta).",[]],
+ ["Tú · local","M","Paso 12","Workspace de keos-installer","render-keos.sh genera keos.yaml y override_vars. El ingress-nginx.yaml que dejó cloud-provisioner (solo LB interno) contradecía el override; está aparcado como .bak.",[]],
+ ["keos-installer","K","Paso 13","keos install (lo lanzas tú)","Contenedor keos-installer 1.4.2. Despliega ingress-nginx, external-dns, velero, driver EFS, observabilidad. En marcha: hay un contenedor activo y aún no hay namespaces keos-*.",[]],
+ ["Propietario del entorno","A","Paso 14","Limpieza","Fuera de la sesión asistida: lo hace el propietario con su script. Después hay que comprobar que no quedan VPC, NAT, EIP ni volúmenes.",[]]
+];
+var grpEl=$("#tl");
+P.forEach(function(p,i){
+  var li=document.createElement("div");li.className="ph"+(p[2]==="Paso 13"?" todo":"");
+  var card='<div class="card '+p[1]+'"><h3>'+esc(p[3])+' <span class="who">'+esc(p[0])+'</span></h3><p>'+esc(p[4])+'</p>'+
+    (p[5].length?'<ul>'+p[5].map(function(t){return "<li>"+esc(t)+"</li>";}).join("")+'</ul>':'')+'</div>';
+  li.innerHTML='<div class="st">'+esc(p[2].replace("Pasos ","P. ").replace("Paso ","P. "))+'</div>'+card;
+  grpEl.appendChild(li);
+});
+
+/* ---------- catálogo ---------- */
+var cols=[["svc","Servicio"],["nm","Nombre"],["sb","Nombre / ID"],["scope","Ámbito"],["k","Creado por"],["st","Estado"],["del","Se borra con"],["sh","Compartido"]];
+var thr=$("#thr"),sortK="svc",sortD=1;
+cols.forEach(function(c){var th=document.createElement("th");th.textContent=c[1];th.setAttribute("role","button");th.tabIndex=0;th.setAttribute("data-k",c[0]);
+  function go(){if(sortK===c[0])sortD=-sortD;else{sortK=c[0];sortD=1;}render();}
+  th.addEventListener("click",go);th.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();go();}});
+  thr.appendChild(th);});
+function fill(sel,vals){var s=$(sel);vals.forEach(function(v){var o=document.createElement("option");o.value=v;o.textContent=v;s.appendChild(o);});}
+function uniq(f){var o={};I.forEach(function(x){o[f(x)]=1;});return Object.keys(o).sort();}
+fill("#fs",uniq(function(x){return x.svc;}));fill("#fa",uniq(function(x){return x.scope;}));
+(function(){var s=$("#fk");Object.keys(CK).forEach(function(k){var o=document.createElement("option");o.value=k;o.textContent=k+" · "+CK[k];s.appendChild(o);});})();
+function render(){
+  var q=$("#q").value.toLowerCase(),fs=$("#fs").value,fa=$("#fa").value,fk=$("#fk").value,fe=$("#fe").value,fh=$("#fh").value;
+  var rows=I.filter(function(x){
+    if(fs&&x.svc!==fs)return false;if(fa&&x.scope!==fa)return false;if(fk&&x.k!==fk)return false;if(fe&&x.st!==fe)return false;if(fh&&x.sh!==fh)return false;
+    if(q&&(x.nm+" "+x.sb+" "+x.svc+" "+x.scope+" "+x.d).toLowerCase().indexOf(q)<0)return false;return true;});
+  rows.sort(function(a,b){var A=String(a[sortK]).toLowerCase(),B=String(b[sortK]).toLowerCase();return (A<B?-1:A>B?1:0)*sortD;});
+  $$("th",thr).forEach(function(th){th.setAttribute("aria-sort",th.getAttribute("data-k")===sortK?(sortD>0?"ascending":"descending"):"none");});
+  $("#cnt").textContent=rows.length+" de "+I.length+" recursos";
+  $("#tb").innerHTML=rows.map(function(x){
+    return '<tr data-id="'+x.id+'"><td>'+esc(x.svc)+'</td><td>'+esc(x.nm)+'</td><td class="id">'+esc(x.sb)+'</td><td>'+esc(x.scope)+'</td>'+
+     '<td><span class="pill '+x.k+'">'+x.k+' · '+esc(CK[x.k])+'</span></td><td>'+esc(ST[x.st])+'</td><td>'+esc(x.del)+'</td><td>'+esc(x.sh)+'</td></tr>';}).join("");
+}
+["#q","#fs","#fa","#fk","#fe","#fh"].forEach(function(s){$(s).addEventListener("input",render);});
+$("#tb").addEventListener("click",function(e){var r=e.target.closest("tr");if(!r)return;tab("mapa");show(r.getAttribute("data-id"),true);});
+render();
+
+/* ---------- compartido ---------- */
+(function(){
+  function list(sel,test){
+    var out={};I.filter(test).forEach(function(x){(out[x.svc]=out[x.svc]||[]).push(x);});
+    $(sel).innerHTML=Object.keys(out).sort().map(function(s){
+      return '<h5 style="margin-top:8px">'+esc(s)+'</h5>'+out[s].map(function(x){
+        return '<div class="chips" style="margin-bottom:4px"><button type="button" class="chip '+x.k+' st-'+x.st+'" style="width:100%" data-id="'+x.id+'"><span class="b">'+x.k+'</span><span class="nm">'+esc(x.nm)+(x.sh==="parcial"?" · mixto":"")+'</span><span class="sb">'+esc(x.sb)+'</span></button></div>';}).join("");}).join("");
+  }
+  list("#sh-si",function(x){return x.sh==="sí"||x.sh==="parcial";});
+  list("#sh-no",function(x){return x.sh==="no"&&x.slot.indexOf("cl-")!==0&&x.slot!=="local"&&x.st!=="p";});
+  document.addEventListener("click",function(e){var c=e.target.closest("#p-compartido .chip");if(c){tab("mapa");show(c.getAttribute("data-id"),true);}});
+})();
+
+/* ---------- pestañas ---------- */
+var names=["mapa","flujos","fases","catalogo","compartido"];
+function tab(n,keep){
+  names.forEach(function(k){var on=k===n;$("#t-"+k).setAttribute("aria-selected",on?"true":"false");$("#p-"+k).hidden=!on;});
+  if(!keep)store("eksleg-tab",n);
+}
+names.forEach(function(k){$("#t-"+k).addEventListener("click",function(){tab(k);});});
+var h=(location.hash||"").replace("#",""),s0=store("eksleg-tab");
+tab(names.indexOf(h)>=0?h:(names.indexOf(s0)>=0?s0:"mapa"),true);
+})();
+</script>

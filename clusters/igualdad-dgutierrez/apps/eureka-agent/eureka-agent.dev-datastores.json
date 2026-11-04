@@ -1,0 +1,33 @@
+{
+    "descriptor": {
+        "service": "bdl",
+        "model": "agent-bdl-default",
+        "version": "15.1.0"
+    },
+    "deployment": {
+        "settings": {
+            "bdlAgentEnableFetchJar": true,
+            "bdlAgentAdditionalJars": "http://connectors-management.dev-apps/v1/api/artifact/Connector_sscc-postgresql_2.12_1.6.1-a8eef0c.jar,http://connectors-management.dev-apps/v1/api/artifact/Connector_sscc-s3_2.12_1.5.1-49ce769.jar"
+        },
+        "general": {
+            "resources": {
+                "MEM": 2048,
+                "podCpuLimit": 2,
+                "CPUs": 0.5,
+                "podMemoryLimit": 2048
+            },
+            "serviceId": "eureka-agent",
+            "appname": "eureka-agent",
+            "namespaces": {
+                "k8sNamespace": "dev-datastores"
+            },
+            "dependencies": {
+                "postgresDiscovery": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Apool-psql.dev-datastores&host=pool-psql",
+                "postgresPolicies": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Apsql.dev-datastores"
+            },
+            "priorities": {
+                "application": "https://cct-paas-services:8443/v1/priority-classes/metadata?q=applications-normal"
+            }
+        }
+    }
+}

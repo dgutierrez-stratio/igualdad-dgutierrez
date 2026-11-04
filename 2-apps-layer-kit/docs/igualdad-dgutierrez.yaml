@@ -1,0 +1,87 @@
+env:
+  UNIVERSE_VERSION: "15.1.0"
+  USER_ID: "admin"
+  USER_NAME: "admin"
+  ENVIRONMENT_SIZE: "S"
+  KEOS_WORKSPACE_DIR: "/stratio/e/igualdad"
+  KEOS_INSTALLER_EXTRA_ARGS: "--net host"
+tenants:
+  - name: keos
+    apps:
+    - parallel:
+      - name: dg-businessglossary-api
+    - parallel:
+      - name: dg-ontology-graph-api
+      - name: dg-discovery-manager
+    - parallel:
+      - name: governance-map
+      - name: governance-ui
+        env:
+          GOVERNANCE_UI_ENABLE_SEARCHER: "false"
+  - name: dev
+    env:
+      DEPENDENCIES_POSTGRES_APP_NAME: pg-meta
+      DEPENDENCIES_POSTGRES_APP_NAMESPACE_SUFFIX: datastores
+      DEPENDENCIES_PGBOUNCER_APP_NAME: pool-pgmeta
+      DEPENDENCIES_PGBOUNCER_APP_NAMESPACE_SUFFIX: datastores
+      DEPENDENCIES_HDFS_APP_NAME: hdfs
+      DEPENDENCIES_HDFS_APP_NAMESPACE_SUFFIX: datastores
+      DEPENDENCIES_CONNECTORS_APP_NAME: connectors
+      DEPENDENCIES_CONNECTORS_APP_NAMESPACE_SUFFIX: apps
+      DEPENDENCIES_VIRTUALIZER_APP_NAME: virtualizer
+      DEPENDENCIES_VIRTUALIZER_APP_NAMESPACE_SUFFIX: apps
+      DEPENDENCIES_DISCOVERY_APP_NAME: discovery
+      DEPENDENCIES_DISCOVERY_APP_NAMESPACE_SUFFIX: apps
+      DEPENDENCIES_EUREKA_AGENT_APP_NAME: eureka-agent
+      DEPENDENCIES_EUREKA_AGENT_APP_NAMESPACE_SUFFIX: datastores
+    apps:
+    - parallel:
+      - name: postgres
+        env:
+          APP_NAME: pg-meta
+      - name: postgres
+        env:
+          APP_NAME: pg-data
+      - name: hdfs
+      - name: connectors-management
+        env:
+          APP_NAME: connectors
+          APP_NAMESPACE_SUFFIX: apps
+    - parallel:
+      - name: postgres-agent
+        env:
+          APP_NAME: pg-meta-agent
+      - name: postgres-agent
+        env:
+          APP_NAME: pg-data-agent
+          DEPENDENCIES_POSTGRES_APP_NAME: pg-data
+      - name: pgbouncer
+        env:
+          APP_NAME: pool-pgmeta
+      - name: pgbouncer
+        env:
+          APP_NAME: pool-pgdata
+          DEPENDENCIES_POSTGRES_APP_NAME: pg-data
+    - parallel:
+      - name: virtualizer
+        env:
+          APP_NAMESPACE_SUFFIX: apps
+    - parallel:
+      - name: rocket
+      - name: eureka-agent
+        env:
+          APP_NAMESPACE_SUFFIX: datastores
+      - name: connector-dfs-hdfs
+        env:
+          APP_NAMESPACE_SUFFIX: datastores
+      - name: dg-datarest-pgi
+        env:
+          APP_NAMESPACE_SUFFIX: apps
+          DEPENDENCIES_POSTGRES_APP_NAME: pg-data
+          DEPENDENCIES_PGBOUNCER_APP_NAME: pool-pgdata
+          DG_DATAREST_DB: dashboard-resolver
+    - parallel:
+      - name: discovery
+        env:
+          APP_NAMESPACE_SUFFIX: apps
+      - name: intelligence

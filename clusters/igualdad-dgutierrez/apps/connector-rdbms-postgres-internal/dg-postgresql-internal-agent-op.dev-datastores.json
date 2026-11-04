@@ -1,0 +1,56 @@
+{
+    "descriptor": {
+        "service": "connectors-rdbms",
+        "model": "agent-rdbms-postgresql-internal",
+        "version": "15.1.0"
+    },
+    "deployment": {
+        "general": {
+            "serviceId": "dg-postgresql-internal-agent-op",
+            "name": "dg-postgresql-internal-agent-op",
+            "externalConfig": {
+                "discoveredDB": {
+                    "customServiceName": "psql.dev-datastores",
+                    "customInitPath": "/psql",
+                    "customSkipResourcesAtRootPath": true
+                },
+                "connectorGeneral": {
+                    "customServiceDsSecurity": "TLS",
+                    "customSSCCDriverJar": "http://connectors-management.dev-apps/v1/api/artifact/Connector_sscc-postgresql_2.12_1.6.1-a8eef0c.jar"
+                },
+                "discoveredFilters": {
+                    "optionPathsResources": "false",
+                    "customResourcesRegex": "",
+                    "customSkipResourcesRegex": "",
+                    "customPathsWithResourcesRegex": "",
+                    "customPathsRegex": "",
+                    "customSkipPathsRegex": ""
+                }
+            },
+            "resources": {
+                "CPUs": 0.25,
+                "MEM": 1024,
+                "cpuLimit": 0.75,
+                "memLimit": 1024
+            },
+            "namespaces": {
+                "k8sNamespace": "dev-datastores"
+            },
+            "dependencies": {
+                "postgresDiscovery": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Apool-psql.dev-datastores&host=pool-psql",
+                "postgresPolicies": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Apsql.dev-datastores"
+            },
+            "priorities": {
+                "application": "https://cct-paas-services:8443/v1/priority-classes/metadata?q=default-nonpreempting"
+            }
+        },
+        "settings": {
+            "discoverySchedule": {
+                "discoveryCronPeriod": "5000",
+                "discoveryFullCronPeriod": "0 0 0 * * ?",
+                "discoveryFirstIterationIsFull": true
+            }
+        }
+    }
+}
+

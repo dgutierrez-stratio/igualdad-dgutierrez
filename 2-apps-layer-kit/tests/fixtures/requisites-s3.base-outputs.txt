@@ -1,0 +1,9 @@
+  InternalS3BucketName:
+    Description: Name of the internal S3 bucket
+    Value: !Ref InternalS3BucketName
+  InternalS3BucketUser:
+    Description: IAM user with s3:* on the internal bucket only
+    Value: !Ref InternalS3BucketUser
+  S3StratioAppsSecretArn:
+    Description: ARN of the secret storing access key for the internal S3 bucket (read by s3-requisites.sh env)
+    Value: !Ref S3StratioAppsSecret

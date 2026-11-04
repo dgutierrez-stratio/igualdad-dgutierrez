@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# aws FALSO para pruebas offline: registra cada llamada en $MOCK_LOG y responde con JSON enlatado de $MOCK_DATA.
+# No habla con AWS. Variables: MOCK_LOG, MOCK_DATA, MOCK_ACCOUNT (def. 111111111111), MOCK_CALLER_ARN.
+args=("$@"); prof=""; svc=""; op=""; kcfg=""
+i=0
+while [[ $i -lt ${#args[@]} ]]; do
+  a="${args[$i]}"
+  case "$a" in
+    --profile) prof="${args[$((i+1))]}"; i=$((i+2)); continue ;;
+    --region|--output|--query|--name|--kubeconfig|--cli-read-timeout)
+      [[ "$a" == --kubeconfig ]] && kcfg="${args[$((i+1))]}"; i=$((i+2)); continue ;;
+    --version) echo "aws-cli/2.17.0 Python/3.12 Mock"; exit 0 ;;
+    -*) i=$((i+1)); continue ;;
+    *) if [[ -z "$svc" ]]; then svc="$a"; elif [[ -z "$op" ]]; then op="$a"; fi ;;
+  esac
+  i=$((i+1))
+done
+echo "${svc} ${op} :: $*" >> "${MOCK_LOG:?}"
+if [[ "$svc" == configure ]]; then
+  if [[ "$op" == get && "$*" == *role_arn*igualdad* ]]; then echo "arn:aws:iam::${MOCK_ACCOUNT:-111111111111}:role/OrganizationAccountAccessRole"; exit 0; fi
+  [[ "$op" == list-profiles ]] && { printf 'default\nigualdad\ncloud-provisioner\n'; exit 0; }
+  exit 1
+fi
+if [[ "$svc" == sts && "$op" == get-caller-identity ]]; then
+  acct="${MOCK_ACCOUNT:-111111111111}"; arn="${MOCK_CALLER_ARN:-arn:aws:iam::$acct:user/cloud-provisioner}"
+  echo "{\"Account\":\"$acct\",\"Arn\":\"$arn\",\"UserId\":\"AIDAMOCK\"}"; exit 0
+fi
+[[ "$svc" == eks && "$op" == update-kubeconfig && -n "$kcfg" ]] && { echo "mock: kubeconfig" > "$kcfg"; echo "Updated"; exit 0; }
+# Bucket de backups opcional (recursos "backups" del stack requisites): ausentes por defecto. MOCK_BACKUPS_BUCKET=1, MOCK_BACKUPS_USER=1,
+# MOCK_BACKUPS_SECRET=1 y MOCK_BACKUPS_OUT=1 (el stack declara los outputs BackupsS3*) los hacen existir.
+if [[ "$svc" == s3api && "$op" == head-bucket ]]; then
+  if [[ "$*" == *"--bucket demo-x-backups"* ]]; then [[ -n "${MOCK_BACKUPS_BUCKET:-}" ]] || exit 254; fi
+  exit 0
+fi
+if [[ "$svc" == iam && "$op" == get-user && "$*" == *"--user-name demo-x-backups"* ]]; then [[ -n "${MOCK_BACKUPS_USER:-}" ]] || exit 254; echo '{"User":{"UserName":"demo-x-backups"}}'; exit 0; fi
+if [[ "$svc" == secretsmanager && "$op" == describe-secret && "$*" == *"--secret-id demo-x-backups"* ]]; then [[ -n "${MOCK_BACKUPS_SECRET:-}" ]] || exit 254; echo '{"Name":"demo-x-backups"}'; exit 0; fi
+if [[ "$svc $op" == "cloudformation describe-stacks" && "$*" == *"demo-x-requisites"* ]]; then
+  if [[ -n "${MOCK_NO_REQUISITES:-}" ]]; then echo '{}'
+  elif [[ -n "${MOCK_REQ_OTHER:-}" ]]; then cat "${MOCK_DATA:?}/cloudformation_describe-stacks-requisites-otro.json"
+  elif [[ -n "${MOCK_BACKUPS_OUT:-}" ]]; then cat "${MOCK_DATA:?}/cloudformation_describe-stacks-requisites-backups.json"
+  else cat "${MOCK_DATA:?}/cloudformation_describe-stacks-requisites.json"; fi
+  exit 0
+fi
+f="${MOCK_DATA:?}/${svc}_${op}.json"
+if [[ -f "$f" ]]; then cat "$f"; else echo '{}'; fi
+exit 0

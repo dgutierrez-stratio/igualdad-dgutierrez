@@ -1,0 +1,33 @@
+{
+    "descriptor": {
+        "service": "dlc-entity",
+        "model": "default",
+        "version": "15.1.0"
+    },
+    "deployment": {
+        "general": {
+            "serviceId": "dlc-entity",
+            "dlcEntityInstanceName": "dlc-entity",
+            "networking": {
+                "haProxyHost": "admin.igualdad-dgutierrez.desa.int"
+            },
+            "resources": {
+                "CPUs": 0.5,
+                "MEM": 1024,
+                "cpuLimit": 1.5,
+                "memLimit": 1024
+            },
+            "namespaces": {
+                "k8sNamespace": "dev-dlc"
+            },
+            "dependencies": {
+                "postgresConnectionDB": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Apool-psql.dev-datastores&host=pool-psql",
+                "postgresPolicies": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Apsql.dev-datastores",
+                "rocketApp": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Arocket.dev-rocket"
+            },
+            "priorities": {
+                "application": "https://cct-paas-services:8443/v1/priority-classes/metadata?q=applications-normal"
+            }
+        }
+    }
+}

@@ -1,0 +1,1 @@
+{"HostedZones":[{"Id":"/hostedzone/ZPUB","Name":"demo-x.desa.int.","Config":{"PrivateZone":false}},{"Id":"/hostedzone/ZPRIV","Name":"demo-x.desa.int.","Config":{"PrivateZone":true}}]}

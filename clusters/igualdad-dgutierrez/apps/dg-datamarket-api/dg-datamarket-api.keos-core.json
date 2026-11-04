@@ -1,0 +1,32 @@
+{
+    "descriptor": {
+        "service": "data-marketplace",
+        "model": "datamarket-api-default",
+        "version": "15.1.0"
+    },
+    "deployment": {
+        "settings": {
+            "swaggerEnabled": true
+        },
+        "general": {
+            "serviceIdName": "dg-datamarket-api",
+            "resources": {
+                "MEM": 768,
+                "podCpuLimit": 1,
+                "CPUs": 0.3,
+                "podMemoryLimit": 768
+            },
+            "serviceId": "dg-datamarket-api",
+            "namespaces": {
+                "k8sNamespace": "keos-core"
+            },
+            "dependencies": {
+                "dictionaryApi": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Adg-businessglossary-api.keos-core",
+                "searcherApi": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Ase-searcher.keos-core"
+            },
+            "priorities": {
+                "application": "https://cct-paas-services:8443/v1/priority-classes/metadata?q=applications-normal"
+            }
+        }
+    }
+}

@@ -1,0 +1,87 @@
+{
+    "name": "opensearch1--usage",
+    "description": "",
+    "auditable": true,
+    "startDate": null,
+    "endDate": null,
+    "enable": true,
+    "uids":
+    [
+        "genai-api.dev-genai",
+        "execution-identity-rocket.dev-rocket",
+        "rocket.dev-rocket",
+        "dev-user"
+    ],
+    "gids":
+    [],
+    "services":
+    [
+        {
+            "serviceType": "OpenSearch",
+            "version": "3.0.5-rc.1",
+            "instances":
+            [
+                {
+                    "sid": "opensearch1.dev-datastores",
+                    "acls":
+                    [
+                        {
+                            "resourceType": "Index",
+                            "name": "*",
+                            "recursive": true,
+                            "filter": null,
+                            "jdbc": null,
+                            "tls": null,
+                            "applyFilter": false,
+                            "actionsAllow":
+                            [
+                                "Create",
+                                "Delete",
+                                "Manage",
+                                "Monitor",
+                                "Read",
+                                "Write"
+                            ],
+                            "actionsDeny":
+                            []
+                        },
+                        {
+                            "resourceType": "Cluster",
+                            "name": "*",
+                            "recursive": true,
+                            "filter": null,
+                            "jdbc": null,
+                            "tls": null,
+                            "applyFilter": false,
+                            "actionsAllow":
+                            [
+                                "Manage",
+                                "Manage snapshots",
+                                "Monitor"
+                            ],
+                            "actionsDeny":
+                            []
+                        },
+                        {
+                            "resourceType": "Tenant",
+                            "name": "*",
+                            "recursive": true,
+                            "filter": null,
+                            "jdbc": null,
+                            "tls": null,
+                            "applyFilter": false,
+                            "actionsAllow":
+                            [
+                                "Read",
+                                "Write"
+                            ],
+                            "actionsDeny":
+                            []
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    "tid": "dev"
+}

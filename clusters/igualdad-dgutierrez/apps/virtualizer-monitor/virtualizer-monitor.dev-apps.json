@@ -1,0 +1,50 @@
+{
+    "descriptor": {
+        "service": "virtualizer",
+        "model": "virtualizer-monitor",
+        "version": "15.1.0"
+    },
+    "deployment": {
+        "settings": {
+            "scheduler": {
+                "schedulerDeleteStatusQuery": "ACTIVE,PAGING,STOPPED,COMPLETE,FAILURE,ZOMBIE",
+                "schedulerDeleteStatusSession": "OPENED,CLOSED,ERROR",
+                "schedulerDeleteStatusService": "STOPPED,ERROR"
+            }
+        },
+        "general": {
+            "custom": [
+                {
+                    "key": "SERVER_MAXHTTPHEADERSIZE",
+                    "value": "65536"
+                }
+            ],
+            "swagger_prefix": "/virtualizer-monitor/${Application.id}/monitor",
+            "oauth2Enable": "true",
+            "virtualizerServerHost": "admin.igualdad-dgutierrez.desa.int",
+            "serviceId": "virtualizer-monitor",
+            "resources": {
+                "memLimit": "512",
+                "CPUs": 0.1,
+                "cpuLimit": "1",
+                "MEM": "512"
+            },
+            "virtualizer_monitor_tenant": "dev",
+            "virtualizer_monitor_external_domain": "igualdad-dgutierrez.desa.int",
+            "datastoreDatabase": "virtualizer-monitor",
+            "adminAuthGroups": "dev-stratio-owners",
+            "namespaces": {
+                "k8sNamespace": "dev-apps"
+            },
+            "dependencies": {
+                "primaryPostgresConnectionDB": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Apool-psql.dev-datastores&host=pool-psql",
+                "secondaryPostgresConnectionDB": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Apool-psql.dev-datastores&host=pool-psql",
+                "postgresPolicies": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Apsql.dev-datastores"
+            },
+            "priorities": {
+                "application": "https://cct-paas-services:8443/v1/priority-classes/metadata?q=applications-normal"
+            }
+        },
+        "SERVER_MAXHTTPHEADERSIZE": "65536"
+    }
+}

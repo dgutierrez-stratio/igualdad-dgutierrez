@@ -1,0 +1,4 @@
+{"cluster":{"name":"demo-x","status":"ACTIVE","endpoint":"https://ABC.eks.amazonaws.com","certificateAuthority":{"data":"Zm9v"},
+ "resourcesVpcConfig":{"vpcId":"vpc-0123456789abcdef0","subnetIds":["subnet-bbb1","subnet-bbb2","subnet-bbb3"],"clusterSecurityGroupId":"sg-eks"},
+ "identity":{"oidc":{"issuer":"https://oidc.eks.eu-west-1.amazonaws.com/id/ABCDEF"}},
+ "tags":{"kubernetes.io/cluster/demo-x":"owned","sigs.k8s.io/cluster-api-provider-aws/cluster/demo-x":"owned","Name":"demo-x"}}}

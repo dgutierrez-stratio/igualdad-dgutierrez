@@ -1,0 +1,1 @@
+{"SecurityGroups":[{"GroupId":"sg-default","GroupName":"default","IpPermissions":[],"IpPermissionsEgress":[]},{"GroupId":"sg-eks","GroupName":"eks-cluster-sg-demo-x-1","IpPermissions":[{"IpProtocol":"-1"}],"IpPermissionsEgress":[{"IpProtocol":"-1"}]}]}

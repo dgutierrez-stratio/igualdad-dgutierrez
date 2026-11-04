@@ -1,0 +1,43 @@
+{
+    "auditable": true,
+    "description": "",
+    "enable": true,
+    "endDate": null,
+    "gids": [
+        "dev-virtualizer"
+    ],
+    "name": "rocket.dev-rocket-virtualizer.dev-apps-acl",
+    "services": [
+        {
+            "instances": [
+                {
+                    "acls": [
+                        {
+                            "actionsAllow": [
+                                "Other"
+                            ],
+                            "actionsDeny": [],
+                            "applyFilter": false,
+                            "filter": null,
+                            "jdbc": null,
+                            "name": "rocket.dev-rocket",
+                            "recursive": true,
+                            "resourceType": "impersonator",
+                            "tls": null
+                        }
+                    ],
+                    "sid": "virtualizer.dev-apps"
+                }
+            ],
+            "serviceType": "Virtualizer",
+            "version": "1.1.0-e675936"
+        }
+    ],
+    "startDate": null,
+    "tid": "dev",
+    "uids": [
+        "rocket.dev-rocket",
+        "execution-identity-rocket.dev-rocket"
+    ]
+}
+

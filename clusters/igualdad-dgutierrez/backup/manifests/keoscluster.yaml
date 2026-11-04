@@ -1,0 +1,60 @@
+apiVersion: installer.stratio.com/v1beta1
+kind: KeosCluster
+metadata:
+    name: igualdad-dgutierrez
+    namespace: cluster-igualdad-dgutierrez
+spec:
+    deploy_autoscaler: true
+    infra_provider: aws
+    k8s_version: v1.35.0
+    region: eu-west-1
+    networks:
+        vpc_id: vpc-0f7b98399966cea8c
+        subnets:
+            - subnet_id: subnet-07b3596c1b53be310
+            - subnet_id: subnet-0b39e391217ffce89
+            - subnet_id: subnet-0dd9b6072b472734f
+    dns:
+        manage_zone: true
+    docker_registries:
+        - auth_required: false
+          type: ecr
+          url: 717279725338.dkr.ecr.eu-west-1.amazonaws.com
+          keos_registry: true
+          ecr_pull_through_cache_enabled: true
+    helm_repository:
+        auth_required: false
+        url: oci://717279725338.dkr.ecr.eu-west-1.amazonaws.com/helm
+        type: ecr
+        release_interval: 1m
+        release_retries: 3
+        release_source_interval: 1m
+        repository_interval: 10m
+    external_domain: igualdad-dgutierrez.desa.int
+    control_plane:
+        managed: true
+        aws:
+            associate_oidc_provider: true
+            mp_role_name: eks-nodegroup.cluster-api-provider-aws.sigs.k8s.io
+            logging:
+                api_server: true
+                audit: false
+                authenticator: true
+                controller_manager: false
+                scheduler: false
+    worker_nodes:
+        - name: desa-eks-1
+          ami_type: BOTTLEROCKET_x86_64
+          quantity: 3
+          size: m6a.4xlarge
+          labels:
+            disktype: standard
+          max_size: 6
+          min_size: 3
+          root_volume:
+            size: 100
+            type: gp3
+            encrypted: true
+    cluster_config_ref:
+        name: igualdad-dgutierrez
+

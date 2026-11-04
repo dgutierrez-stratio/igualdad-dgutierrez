@@ -1,0 +1,30 @@
+{
+    "descriptor": {
+        "service": "genai",
+        "model": "genai-litellm",
+        "version": "15.1.0"
+    },
+    "deployment": {
+        "general": {
+            "networking": {
+                "ingressHost": "admin.igualdad-dgutierrez.desa.int",
+                "ingressBasePath": "/genai-litellm",
+                "oauth2ProxyExternalHost": "admin.igualdad-dgutierrez.desa.int"
+            },
+            "serviceId": "genai-litellm",
+            "namespaces": {
+                "k8sNamespace": "dev-genai"
+            },
+            "dependencies": {
+                "postgresConnectionDB": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Apool-psql.dev-datastores&host=pool-psql",
+                "postgresPolicies": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Apsql.dev-datastores"
+            },
+            "resources": {
+                "memLimit": 2048,
+                "CPUs": 1,
+                "cpuLimit": 1,
+                "MEM": 2048
+            }
+        }
+    }
+}

@@ -1,0 +1,48 @@
+{
+    "descriptor": {
+        "service": "genai",
+        "model": "genai-ui",
+        "version": "15.1.0"
+    },
+    "deployment": {
+        "settings": {
+            "chainChat": {
+                "opensearchEnabled": true,
+                "genaiLitellmModel": "gpt-5.4-mini"
+            },
+            "chainGovernance": {
+                "chainGovernanceLitellmModel": "gpt-5.4-mini"
+            },
+            "externalDashboards": {
+                "discoveryInternalUrl": "discovery.dev-apps",
+                "discoveryUrl": "https://admin.igualdad-dgutierrez.desa.int/discovery.dev-apps",
+                "discoveryDatabase": 3
+            },
+            "generalProperties": {
+                "governanceOpenSearchService": "opensearch1.keos-core"
+            }
+        },
+        "general": {
+            "networking": {
+                "haProxyHost": "admin.igualdad-dgutierrez.desa.int",
+                "haProxyPath": "/genai-ui.dev-genai"
+            },
+            "resources": {
+                "MEM": 512,
+                "DISK": 10240,
+                "memLimit": 512,
+                "CPUs": 0.1,
+                "cpuLimit": 1
+            },
+            "serviceId": "genai-ui",
+            "namespaces": {
+                "k8sNamespace": "dev-genai"
+            },
+            "dependencies": {
+                "genaiApi": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Agenai-api.dev-genai",
+                "virtualizerServer": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Avirtualizer.dev-apps",
+                "opensearch": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Aopensearch1.dev-datastores"
+            }
+        }
+    }
+}

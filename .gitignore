@@ -1,0 +1,32 @@
+# Secretos y generados: NO subir a git (ver README.md, seccion "Que es secreto")
+
+# Secretos / credenciales
+secrets.yml
+cluster.yaml
+kubeconfig-*
+.env
+admin.key
+admin.cert
+**/aws/
+
+# Estado y generados de la fase 1-2 (cluster.yaml con claves IAM, kubeconfig, JSON de la VPC, politicas IAM temporales)
+estado/
+.work/
+*.log
+
+# Generados por keos-installer / cloud-provisioner (dueno root)
+.kube/
+.config/
+pki/
+requirements/
+logs/
+.keos_bash_history
+
+# Generados por apps-layer en el workspace
+/apps/
+*-tenant.yaml
+*_group.json
+*-users_role.json
+
+# Backup de objetos del clúster (también docs/backup-originales): los Secret (kubeconfig, certificados) nunca a git
+**/objects/Secret_*

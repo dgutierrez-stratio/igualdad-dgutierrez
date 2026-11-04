@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# gh FALSO: registra y responde. MOCK_GH_NOAUTH=1 -> `gh auth status` falla; MOCK_GH_FAIL=1 -> `gh api` falla.
+echo "gh :: $*" >> "${MOCK_LOG:?}"
+case "${1:-}" in
+  auth) [[ "${MOCK_GH_NOAUTH:-0}" != 1 ]] || exit 1 ;;
+  api) [[ "${MOCK_GH_FAIL:-0}" != 1 ]] || exit 1; echo "stratio-releases.repo.stratio.com/stratio/connectors-loader:2.2.3" ;;
+esac
+exit 0

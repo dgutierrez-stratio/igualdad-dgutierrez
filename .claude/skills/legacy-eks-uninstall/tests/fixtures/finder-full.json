@@ -1,0 +1,195 @@
+{
+  "albs_nlbs": [
+    "arn:aws:elasticloadbalancing:eu-west-1:111111111111:loadbalancer/net/a25603528a10c4f8c9e258a7b66398d4/5dc526b195106b62"
+  ],
+  "athena_workgroups": [
+    "primary"
+  ],
+  "autoscaling_groups": [
+    "eks-cluster-demo-x_desa-eks-1-mp-0-f6d0c416-0dc8-a09f-082c-327ae66f9b1b",
+    "eks-cluster-demo-x_desa-eks-1-mp-1-2cd0c416-0ddf-6042-373e-0ded774a6459",
+    "eks-cluster-demo-x_desa-eks-1-mp-2-f6d0c416-0df2-ea5a-6bd4-fce2b43c921f"
+  ],
+  "cloudformation_stacks": [
+    "demo-x-requisites",
+    "cluster-api-provider-aws-sigs-k8s-io"
+  ],
+  "cloudwatch_log_groups": [
+    "/aws/eks/demo-x/cluster"
+  ],
+  "ec2_security_groups": [
+    "sg-0ccab318e6355594b",
+    "sg-0fd23b89905bf33c8",
+    "sg-00ed32e7b62496fcf",
+    "sg-05a093ea0e7bb85a5"
+  ],
+  "ec2_instances": [
+    "i-01f37f5758ecdb6c0",
+    "i-00aa5add9abf91d7d",
+    "i-02078916ce6698862",
+    "i-0ed56ae867a15c9be"
+  ],
+  "ec2_volumes": [
+    "vol-0890b79c444899b60",
+    "vol-00ff864c6d7280db0",
+    "vol-01e946c9c03c20fcd",
+    "vol-0a3fc5d5c7a538abd",
+    "vol-07e21ccc31cf447e7",
+    "vol-09e15e0a053b29c79",
+    "vol-0a58b32e983c7861a",
+    "vol-08342320389296507",
+    "vol-01f9d324c52e9f1cd",
+    "vol-0428a8931ac8669ea",
+    "vol-0c21fed95e7f74e49",
+    "vol-08486d8abadc264c5",
+    "vol-02b7a23b8f0bcbeaf",
+    "vol-0504c1b32a3e13261",
+    "vol-08627e348b1ba5d4f",
+    "vol-0f7c18597e8944ca4",
+    "vol-0402e2b2047fe9649",
+    "vol-06860c2c17a145bea",
+    "vol-08283e3f2b54c6a0b",
+    "vol-0901436af0a381e10",
+    "vol-038afc64dcfbbeb5a",
+    "vol-00c81e213e63d4760",
+    "vol-020d9f593bbda1e52",
+    "vol-0196c338be78e9f98",
+    "vol-09e7addad82e741cd",
+    "vol-0db6325ed410e814d",
+    "vol-01537db103362e6f2",
+    "vol-00cc6226fbd981899",
+    "vol-0bcdf44cbccca97d6",
+    "vol-02e7861c28539396e",
+    "vol-0993cd147cb796edb",
+    "vol-01a291832a558bc0f",
+    "vol-08fd0c129373e60ba",
+    "vol-04a436d95e35ec8bb",
+    "vol-0ece5334a3e5ae099",
+    "vol-08bc902e3a5a4b60b",
+    "vol-018252ace9b706578",
+    "vol-02037e42079a13337",
+    "vol-0eb789884e6cbdbd2",
+    "vol-0a29ac91473c1d442",
+    "vol-05c3c44d6a28c9da3",
+    "vol-0fdadb5552a218355",
+    "vol-000c5318ba4a7b714",
+    "vol-0c9019f0c9e38594a",
+    "vol-012fee9af7fd62795"
+  ],
+  "ec2_network_interfaces": [
+    "eni-0063ec216a5abc08d",
+    "eni-08075ee2ded770782",
+    "eni-087baf99ca98fb9cd",
+    "eni-0fed12b81f507b188",
+    "eni-0d24a9dc5beae60d4",
+    "eni-0c9aab0432b85aaf9",
+    "eni-0426bf0a9d497ba19",
+    "eni-0caf56d1f80b2cc07",
+    "eni-0931f225f1557b481",
+    "eni-0275db57716cd214d",
+    "eni-0f494e63868e0e620",
+    "eni-0c5357a926d9af881",
+    "eni-0e465bf3e473e9379",
+    "eni-0e4eecdcd3cb63e72",
+    "eni-015490262cca8e748",
+    "eni-02f1cb230cd60cb03",
+    "eni-0c9c9394932638e07",
+    "eni-079053145af80b2b1",
+    "eni-0bd1ca64d360bae29",
+    "eni-03fccfe99338151c3",
+    "eni-04fcf760fcdcfb1f3",
+    "eni-0cc2f7a08ecdbf2f3"
+  ],
+  "efs": [
+    "fs-074ac903d84dd870a"
+  ],
+  "eks_clusters": [
+    "demo-x"
+  ],
+  "eips": [
+    "eipalloc-01856f23358d7974b"
+  ],
+  "iam_policies": [
+    "arn:aws:iam::111111111111:policy/csi.cluster-api-provider-aws.sigs.k8s.io",
+    "arn:aws:iam::111111111111:policy/control-plane.cluster-api-provider-aws.sigs.k8s.io",
+    "arn:aws:iam::111111111111:policy/demo-x-external-dns",
+    "arn:aws:iam::111111111111:policy/demo-x-efs-csi",
+    "arn:aws:iam::111111111111:policy/controllers-eks.cluster-api-provider-aws.sigs.k8s.io",
+    "arn:aws:iam::111111111111:policy/controllers.cluster-api-provider-aws.sigs.k8s.io",
+    "arn:aws:iam::111111111111:policy/demo-x-velero",
+    "arn:aws:iam::111111111111:policy/ecr-pull-through-cache-machinepool",
+    "arn:aws:iam::111111111111:policy/nodes.cluster-api-provider-aws.sigs.k8s.io"
+  ],
+  "iam_roles": [
+    "AWSServiceRoleForAmazonEKSNodegroup",
+    "AWSServiceRoleForAmazonElasticFileSystem",
+    "AWSServiceRoleForAutoScaling",
+    "control-plane.cluster-api-provider-aws.sigs.k8s.io",
+    "controllers.cluster-api-provider-aws.sigs.k8s.io",
+    "eks-controlplane.cluster-api-provider-aws.sigs.k8s.io",
+    "eks-nodegroup.cluster-api-provider-aws.sigs.k8s.io",
+    "demo-x-external-dns",
+    "demo-x-iam-service-role",
+    "demo-x-velero",
+    "nodes.cluster-api-provider-aws.sigs.k8s.io",
+    "rol-de-otro-proyecto"
+  ],
+  "iam_users": [
+    "cloud-provisioner",
+    "demo-x-backups",
+    "demo-x-s3"
+  ],
+  "iam_identity_providers": [
+    "arn:aws:iam::111111111111:oidc-provider/oidc.eks.eu-west-1.amazonaws.com/id/63BA1279FAA45B570D610883DBA2971C"
+  ],
+  "kms_keys": [
+    "479952cb-bca7-4ead-827a-abebaff570e2",
+    "66da5b7d-b834-42ab-9cd0-4479f093385c",
+    "db4820f1-549b-42ff-8d10-ab423424ecef"
+  ],
+  "nat_gateways": [
+    "nat-08011c8fc48f10d1e"
+  ],
+  "route53_hosted_zones": [
+    "/hostedzone/Z02446212LYFCJLOWHXVL",
+    "/hostedzone/Z01066162ONKJUYVJEHP9"
+  ],
+  "route_tables": [
+    "rtb-050767d8018a04169",
+    "rtb-0a5fac81cae48bd5f",
+    "rtb-012d8b3ccffae5ae0",
+    "rtb-0c88fa6c255789fb7",
+    "rtb-08f13e0d5a5e03c31",
+    "rtb-0b576c1a7795e4125"
+  ],
+  "s3_buckets": [
+    "demo-x-backups-111111111111",
+    "demo-x-internal-111111111111",
+    "demo-x-velero-111111111111",
+    "bucket-de-otro-equipo"
+  ],
+  "secrets_manager_secrets": [
+    "demo-x-s3",
+    "demo-x-backups",
+    "secreto-ajeno"
+  ],
+  "target_groups": [
+    "arn:aws:elasticloadbalancing:eu-west-1:111111111111:targetgroup/k8s-keosingr-ingressn-0e800dace3/5ec76b044b409b5c",
+    "arn:aws:elasticloadbalancing:eu-west-1:111111111111:targetgroup/k8s-keosingr-ingressn-2871e10d19/1421c17949ffe383"
+  ],
+  "subnets": [
+    "subnet-066202e0d96b8cac2",
+    "subnet-0b39e391217ffce89",
+    "subnet-0dd9b6072b472734f",
+    "subnet-0e207fa920d6563fb",
+    "subnet-0c1af19dfc33ada17",
+    "subnet-0c59882af2131d688",
+    "subnet-0a4660ff0faff3644",
+    "subnet-07b3596c1b53be310",
+    "subnet-020a2a7caed41dba0"
+  ],
+  "vpcs": [
+    "vpc-0f7b98399966cea8c",
+    "vpc-0f717d5c98b8ddb9b"
+  ]
+}

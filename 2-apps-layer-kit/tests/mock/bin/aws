@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# aws FALSO para las pruebas offline del kit: registra cada llamada en $MOCK_LOG y responde con JSON enlatado.
+# No habla con AWS. Estado controlado por variables: MOCK_ACCOUNT (def 111111111111), MOCK_STACK=0|1, MOCK_BUCKET=0|1,
+# MOCK_USER=0|1, MOCK_SECRET=no|si|borrandose, MOCK_VERSIONS=1 (list-object-versions devuelve 2 versiones una sola vez,
+# estado en $MOCK_STATE), MOCK_CLUSTER (valor de la etiqueta cluster del bucket), MOCK_NOKEYS=1 (configure get sin claves).
+# Bucket de backups (recursos cuyo nombre contiene "backups"): MOCK_BACKUPS_OUT=1 (describe-stacks devuelve tambien los outputs
+# BackupsS3*), MOCK_BACKUPS_BUCKET=0|1, MOCK_BACKUPS_USER=0|1, MOCK_BACKUPS_SECRET=no|si|borrandose, MOCK_BACKUPS_CLUSTER (etiqueta
+# cluster del bucket de backups, def demo-x), MOCK_VERSIONS_BACKUPS=1 (list-object-versions del bucket de backups devuelve versiones una vez).
+svc=""; op=""; arg3=""; args=("$@"); i=0; kcfg=""; bkt=""; usr=""; sid=""
+while [[ $i -lt ${#args[@]} ]]; do
+  a="${args[$i]}"
+  case "$a" in
+    --bucket) bkt="${args[$((i+1))]}"; i=$((i+2)); continue ;;
+    --user-name) usr="${args[$((i+1))]}"; i=$((i+2)); continue ;;
+    --secret-id) sid="${args[$((i+1))]}"; i=$((i+2)); continue ;;
+    --profile|--region|--output|--query|--name|--stack-name|--max-items|--cli-read-timeout) i=$((i+2)); continue ;;
+    --kubeconfig) kcfg="${args[$((i+1))]}"; i=$((i+2)); continue ;;
+    --version) echo "aws-cli/2.17.0 Python/3.12 Mock"; exit 0 ;;
+    -*) i=$((i+1)); continue ;;
+    *) if [[ -z "$svc" ]]; then svc="$a"; elif [[ -z "$op" ]]; then op="$a"; elif [[ -z "$arg3" ]]; then arg3="$a"; fi ;;
+  esac
+  i=$((i+1))
+done
+echo "${svc} ${op} :: $*" >> "${MOCK_LOG:?}"
+acct="${MOCK_ACCOUNT:-111111111111}"
+nf() { echo "An error occurred ($1) when calling the $2 operation: not found" >&2; exit 254; }
+case "$svc $op" in
+  "sts get-caller-identity") echo "{\"Account\":\"$acct\",\"Arn\":\"arn:aws:iam::$acct:user/cloud-provisioner\",\"UserId\":\"AIDAMOCK\"}" ;;
+  "cloudformation describe-stacks")
+    [[ "${MOCK_STACK:-0}" == 1 ]] || nf ValidationError DescribeStacks
+    bout=""
+    if [[ "${MOCK_BACKUPS_OUT:-0}" == 1 ]]; then
+      bout=",{\"OutputKey\":\"BackupsS3BucketName\",\"OutputValue\":\"${MOCK_BACKUPS_OUT_BUCKET:-demo-x-backups-111111111111}\"},{\"OutputKey\":\"BackupsS3BucketUser\",\"OutputValue\":\"${MOCK_BACKUPS_OUT_USER:-demo-x-backups}\"},{\"OutputKey\":\"BackupsS3SecretArn\",\"OutputValue\":\"arn:aws:secretsmanager:eu-west-1:$acct:secret:demo-x-backups-XyZ123\"}"
+    fi
+    echo "{\"Stacks\":[{\"StackStatus\":\"${MOCK_STACK_STATUS:-CREATE_COMPLETE}\",\"Outputs\":[{\"OutputKey\":\"InternalS3BucketName\",\"OutputValue\":\"demo-x-internal-111111111111\"},{\"OutputKey\":\"S3StratioAppsSecretArn\",\"OutputValue\":\"arn:aws:secretsmanager:eu-west-1:$acct:secret:demo-x-s3-AbCdEf\"}$bout]}]}" ;;
+  "cloudformation validate-template") echo '{}' ;;
+  "s3api head-bucket")
+    if [[ "$bkt" == *backups* ]]; then [[ "${MOCK_BACKUPS_BUCKET:-0}" == 1 ]] || nf 404 HeadBucket
+    else [[ "${MOCK_BUCKET:-0}" == 1 ]] || nf 404 HeadBucket; fi ;;
+  "s3api get-bucket-tagging")
+    if [[ "$bkt" == *backups* ]]; then echo "{\"TagSet\":[{\"Key\":\"cluster\",\"Value\":\"${MOCK_BACKUPS_CLUSTER:-demo-x}\"}]}"
+    else echo "{\"TagSet\":[{\"Key\":\"cluster\",\"Value\":\"${MOCK_CLUSTER:-demo-x}\"}]}"; fi ;;
+  "iam get-user")
+    if [[ "$usr" == *backups* ]]; then [[ "${MOCK_BACKUPS_USER:-0}" == 1 ]] || nf NoSuchEntity GetUser; echo '{"User":{"UserName":"demo-x-backups"}}'
+    else [[ "${MOCK_USER:-0}" == 1 ]] || nf NoSuchEntity GetUser; echo '{"User":{"UserName":"demo-x-s3"}}'; fi ;;
+  "secretsmanager describe-secret")
+    mocksec="${MOCK_SECRET:-no}"; [[ "$sid" != *backups* ]] || mocksec="${MOCK_BACKUPS_SECRET:-no}"
+    case "$mocksec" in
+      no) nf ResourceNotFoundException DescribeSecret ;;
+      si) echo '{"Name":"demo-x-s3"}' ;;
+      borrandose) echo '{"Name":"demo-x-s3","DeletedDate":1.0}' ;;
+    esac ;;
+  "secretsmanager get-secret-value")
+    if [[ "$sid" == *backups* ]]; then echo '{"SecretString":"{\"ACCESS_KEY\":\"AKIAMOCKBACKUP0000\",\"SECRET_KEY\":\"FAKE/backups+KEY0000\"}"}'
+    else echo '{"SecretString":"{\"ACCESS_KEY\":\"AKIAMOCKFAKE0000\",\"SECRET_KEY\":\"FAKE/secret+KEY0000\"}"}'; fi ;;
+  "s3api list-object-versions")
+    if [[ "$bkt" == *backups* ]]; then st="${MOCK_STATE:-/tmp}/versions_done_backups"; mv_on="${MOCK_VERSIONS_BACKUPS:-0}"
+    else st="${MOCK_STATE:-/tmp}/versions_done"; mv_on="${MOCK_VERSIONS:-0}"; fi
+    if [[ "$mv_on" == 1 && ! -f "$st" ]]; then
+      touch "$st"; echo '{"Versions":[{"Key":"a.csv","VersionId":"v1"},{"Key":"b.csv","VersionId":"v2"}],"DeleteMarkers":[{"Key":"a.csv","VersionId":"dm1"}]}'
+    else echo '{}'; fi ;;
+  "configure get")
+    # claves estaticas ficticias del perfil (MOCK_NOKEYS=1: el perfil no las tiene, como un rol asumido)
+    [[ "${MOCK_NOKEYS:-0}" != 1 ]] || exit 1
+    case "$arg3" in
+      aws_access_key_id) printf 'AKIAMOCKPROFILE0000\n' ;;
+      aws_secret_access_key) printf 'FAKE/profile+SECRET0000\n' ;;
+      *) exit 1 ;;
+    esac ;;
+  "eks update-kubeconfig") [[ -n "$kcfg" ]] && echo "mock: kubeconfig" > "$kcfg"; echo Updated ;;
+  *) echo '{}' ;;
+esac
+exit 0

@@ -1,0 +1,44 @@
+{
+    "descriptor": {
+        "service": "search-engine",
+        "model": "se-searcher-default",
+        "version": "15.1.0"
+    },
+    "deployment": {
+        "general": {
+            "serviceIdName": "se-searcher",
+            "resources": {
+                "memLimit": 1024,
+                "CPUs": 0.1,
+                "MEM": 1024,
+                "cpuLimit": 1
+            },
+            "elasticsearch": {
+                "elasticsearchHAMode": "cluster",
+                "moreElasticsearch": {
+                    "elasticsearchPhoneticPluginEnabled": true
+                }
+            },
+            "serviceId": "se-searcher",
+            "selectEngineObject": {
+                "selectEngine": "opensearch"
+            },
+            "namespaces": {
+                "k8sNamespace": "keos-core"
+            },
+            "dependencies": {
+                "ElasticSearch": "https://cct-applications-query:8443/v1/dependencies/metadata?q=application_id%3Aopensearch1.keos-core"
+            },
+            "priorities": {
+                "application": "https://cct-paas-services:8443/v1/priority-classes/metadata?q=applications-normal"
+            }
+        },
+        "security": {
+            "tenantSecurityEnabled": true,
+            "jwtSecurityEnabled": true,
+            "mutualTlsCnWhitelist": "dg-scheduler-agent",
+            "mutualTlsEnabled": "true"
+        },
+        "ELASTICSEARCH_NODES": "opensearch1.keos-core:9200"
+    }
+}

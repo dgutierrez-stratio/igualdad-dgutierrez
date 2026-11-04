@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: s3-config
+  namespace: dev-rocket
+data:
+  core-site.xml: |-
+    <?xml version="1.0"?>
+        <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+        <configuration>
+        	<property>
+        	    <name>fs.defaultFS</name>
+        	    <value>s3a://igualdad-dgutierrez-internal-699773898240</value>
+        	</property>
+        	<property>
+        	    <name>fs.s3a.impl</name>
+        	    <value>org.apache.spark.connector.sscc.s3.SSCCS3HadoopFileSystem</value>
+        	</property>
+        </configuration>

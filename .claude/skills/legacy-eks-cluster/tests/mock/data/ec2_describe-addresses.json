@@ -1,0 +1,1 @@
+{"Addresses":[{"AllocationId":"eipalloc-1","Tags":[{"Key":"Name","Value":"demo-x-nat"}]},{"AllocationId":"eipalloc-foreign","Tags":[{"Key":"Name","Value":"other-nat"}]}]}
