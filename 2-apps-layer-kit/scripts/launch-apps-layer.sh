@@ -12,7 +12,7 @@
 #
 # Resuelve la IP del NLB de ingress para --add-host admin.<EXTERNAL_DOMAIN> (el dominio no resuelve desde la
 # estacion). Se puede fijar con NLB_IP; si no se resuelve se omite --add-host y se avisa.
-# Monta: APPS_LAYER_DIR -> /apps-layer, KEOS_WORKSPACE_DIR -> /workspace, docker.sock, APPS_LAYER_DIR/aws -> /root/.aws (ro) y el
+# Monta: APPS_LAYER_DIR -> /apps-layer, KEOS_WORKSPACE_DIR -> /workspace (y tambien en su misma ruta del host), docker.sock, APPS_LAYER_DIR/aws -> /root/.aws (ro) y el
 # zip del universo descargado -> /apps-layer-automation/universe/kubernetes-universe-descriptors-<version>.zip y universe-images.lst
 # (gh api, rama branch-<major>.<minor>) -> /apps-layer-automation/universe/<version>-universe-images.lst:ro, ambos sobre los de la imagen.
 # Imagen: APPS_LAYER_IMAGE; con APPS_LAYER_IMAGE_DIGEST=sha256:... se fija por digest (repo:tag@sha256:...).
@@ -97,6 +97,10 @@ ARGS=(docker run -it --rm --name "$NAME"
   -v "$APPS_LAYER_DIR/aws:/root/.aws:ro"
   -v "$ZIP:$UNIVERSE_ZIP_MOUNT_DIR/$ZIP_NAME"
   -v "$LST:$UNIVERSE_ZIP_MOUNT_DIR/$LST_NAME:ro")
+# Desde apps-layer-automation 15.1-0.1.0-M1/M2 (ffecfe8f), enviroment-ready (--reporter) crea directorios temporales en ${KEOS_WORKSPACE_DIR} vistos desde DENTRO del
+# contenedor y los traduce a /workspace para keos-installer: el workspace debe estar tambien montado en su misma ruta del host (quickstart upstream, sin DinD).
+# Sin esto el mktemp falla. Con imagenes anteriores no hace nada. (Si KEOS_WORKSPACE_DIR fuese /workspace, el montaje ya existe y no se duplica.)
+[[ "$KEOS_WORKSPACE_DIR" == /workspace ]] || ARGS+=(-v "$KEOS_WORKSPACE_DIR:$KEOS_WORKSPACE_DIR")
 if [[ -n "$NLB_IP_RESOLVED" ]]; then
   [[ "$NLB_IP_RESOLVED" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "IP de NLB no valida: $NLB_IP_RESOLVED"
   ARGS+=(--add-host "${HOST_FQDN}:${NLB_IP_RESOLVED}")

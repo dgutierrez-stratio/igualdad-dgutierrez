@@ -296,6 +296,7 @@ cat "$W/launch.out" "$W/launch.err" >> "$LOGF"
 check "launch (sin --run) termina bien" test $rc -eq 0
 check "launch imprime docker run con nombre apps-layer-demo-x" bash -c "grep -q '^docker run -it --rm' '$W/launch.out' && grep -q -- '--name apps-layer-demo-x' '$W/launch.out'"
 check "launch: mounts /apps-layer, /workspace, docker.sock y aws ro" bash -c "grep -q -- '-v $D:/apps-layer' '$W/launch.out' && grep -q -- '-v $W/ws:/workspace' '$W/launch.out' && grep -q 'docker.sock' '$W/launch.out' && grep -q -- '$D/aws:/root/.aws:ro' '$W/launch.out'"
+check "launch: workspace tambien montado en su ruta del host (enviroment-ready --reporter, M1/M2)" bash -c "grep -q -- '-v $W/ws:/workspace' '$W/launch.out' && grep -q -- '-v $W/ws:$W/ws' '$W/launch.out'"
 check "launch: --add-host admin.<dominio>:<IP del NLB>" has "$W/launch.out" "--add-host admin.demo-x.example.test:10.1.2.3"
 check "launch: --net host --cgroupns host + imagen por defecto" bash -c "grep -q -- '--net host' '$W/launch.out' && grep -q -- '--cgroupns host' '$W/launch.out' && grep -q 'qa.int.stratio.com/stratio/apps-layer-automation:15.1-0.1.0-SNAPSHOT' '$W/launch.out'"
 check "launch: NO ejecuta docker sin --run" bash -c "! grep -q '^docker ' '$MOCK_LOG'"
