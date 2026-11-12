@@ -56,6 +56,13 @@ D="$W/clusters/demo-x"; export MOCK_LOG="$T/mock.log" MOCK_STATE="$T/state"; mkd
 out="$("$S/uninstall.sh" identify 2>&1)"; grep -q 'CANDIDATO.*cluster=demo-x.*account=111111111111' <<<"$out" && pass "identify lista el clúster instalado" || fail "identify sin candidato: $out"
 out="$("$S/uninstall.sh" identify --dir "$D" 2>&1)"; grep -q 'IDENTIFICADO cluster=demo-x account=111111111111.*eks=ACTIVE' <<<"$out" && pass "identify valida cuenta y EKS" || fail "identify --dir: $out"
 [[ -f "$D/uninstall/identity.json" ]] && pass "identity.json guardado (VPC y OIDC)" || fail "falta identity.json"
+# Regresión: tras reinstalar el clúster (mismo nombre, VPC y OIDC nuevos) un identity.json viejo NO debe mandar sobre el EKS vivo.
+LIVE_VPC="$(jq -r .cluster_vpc "$D/uninstall/identity.json")"; LIVE_OIDC="$(jq -r .oidc_issuer_id "$D/uninstall/identity.json")"
+jq -n '{cluster:"demo-x",cluster_vpc:"vpc-00000000stale0001",oidc_issuer_id:"STALE0000000000000000000000000000"}' > "$D/uninstall/identity.json"
+out="$("$S/uninstall.sh" identify --dir "$D" 2>&1)"
+[[ "$(jq -r .cluster_vpc "$D/uninstall/identity.json")" == "$LIVE_VPC" && "$(jq -r .oidc_issuer_id "$D/uninstall/identity.json")" == "$LIVE_OIDC" ]] && pass "identity.json obsoleto se actualiza con la VPC y el OIDC del EKS vivo" || fail "identity.json obsoleto NO se actualizó: $(cat "$D/uninstall/identity.json")"
+grep -q 'identity.json tenía la VPC vpc-00000000stale0001' <<<"$out" && pass "avisa de que sustituye una VPC distinta (reinstalación)" || fail "sin aviso de VPC sustituida"
+[[ "$(stat -c %a "$D/uninstall/identity.json")" == 600 ]] && pass "identity.json sigue en modo 600" || fail "identity.json con permisos incorrectos"
 "$S/uninstall.sh" apply --dir "$D" --confirm-cluster demo-x --confirm-account 111111111111 >/dev/null 2>&1 && fail "apply sin plan previo" || pass "apply exige plan previo"
 "$S/uninstall.sh" plan --dir "$D" > "$T/plan.out" 2>&1 && pass "plan termina bien" || { fail "plan falla"; tail -5 "$T/plan.out"; }
 grep -q 'PROTEGIDOS: 13' "$T/plan.out" && grep -q 'AJENOS excluidos: 3' "$T/plan.out" && pass "plan informa protegidos y ajenos" || fail "resumen del plan"

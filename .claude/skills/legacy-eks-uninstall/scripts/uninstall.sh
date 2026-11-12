@@ -74,7 +74,14 @@ save_identity() {
   local j; j="$(eks_json)"; has_cluster "$j" || return 0
   local vpc oidc; vpc="$(jq -r '.cluster.resourcesVpcConfig.vpcId // ""' <<<"$j")"; oidc="$(jq -r '.cluster.identity.oidc.issuer // "" | sub("^.*/id/";"")' <<<"$j")"
   local old="{}"; [[ -f "$U/identity.json" ]] && old="$(cat "$U/identity.json")"
-  jq -n --argjson o "$old" --arg v "$vpc" --arg i "$oidc" --arg c "$C" '$o + {cluster:$c} + (if $v!="" and ($o.cluster_vpc//"")=="" then {cluster_vpc:$v} else {} end) + (if $i!="" and ($o.oidc_issuer_id//"")=="" then {oidc_issuer_id:$i} else {} end)' > "$U/identity.json"
+  # El EKS vivo es la fuente de verdad: sus VPC y OIDC SOBRESCRIBEN lo guardado. Antes solo se rellenaban si estaban vacíos, y tras
+  # reinstalar el mismo clúster (mismo nombre, VPC y OIDC nuevos) se conservaban los de la instalación anterior: el filtro no reconocía
+  # la VPC actual como del clúster, la cuenta salía "no dedicada" y todo lo de id opaco quedaba como ajeno. Lo guardado solo vale
+  # cuando el EKS ya no existe (arriba: has_cluster || return 0), que es para lo que se guarda.
+  local ov oo; ov="$(jq -r '.cluster_vpc // ""' <<<"$old")"; oo="$(jq -r '.oidc_issuer_id // ""' <<<"$old")"
+  [[ -z "$ov" || -z "$vpc" || "$ov" == "$vpc" ]] || warn "identity.json tenía la VPC $ov, distinta de la del EKS vivo ($vpc): se actualiza (¿reinstalación del clúster?)"
+  [[ -z "$oo" || -z "$oidc" || "$oo" == "$oidc" ]] || warn "identity.json tenía el OIDC $oo, distinto del del EKS vivo ($oidc): se actualiza (¿reinstalación del clúster?)"
+  jq -n --argjson o "$old" --arg v "$vpc" --arg i "$oidc" --arg c "$C" '$o + {cluster:$c} + (if $v!="" then {cluster_vpc:$v} else {} end) + (if $i!="" then {oidc_issuer_id:$i} else {} end)' > "$U/identity.json"
   chmod 600 "$U/identity.json"
 }
 
