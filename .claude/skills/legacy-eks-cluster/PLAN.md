@@ -8,7 +8,7 @@ de **número de cuenta AWS + nombre de clúster**, aprovisione un EKS "legacy" (
 ## Plan seguido
 
 1. **Leer fuentes** (solo lectura): guía, plantillas y scripts de `/stratio/e/igualdad/` (antes de la reorganizacion: raiz; ahora `1-aws-cluster/`), PR keos-fleet#220
-   (`legacy-latest.md`), doc de Stratio/kind (`installation.adoc`, manual de operaciones) y el código de
+   (guía `instalacion-cliente-legacy.md`; el nombre `legacy-latest.md` era un snapshot local de esa guía, no un fichero de la PR), doc de Stratio/kind (`installation.adoc`, manual de operaciones) y el código de
    cloud-provisioner (`kind-src`) para ver cómo se borra un clúster. Lecturas AWS de solo lectura (SG, CloudFormation,
    roles CAPA, OIDC, tags del EKS) con el perfil `cloud-provisioner` para anclar el descubrimiento por tags.
 2. **Diseño de la skill**: una sola skill con `SKILL.md` (flujo + reglas de interacción) y `references/`, `scripts/`,
@@ -84,7 +84,7 @@ de **número de cuenta AWS + nombre de clúster**, aprovisione un EKS "legacy" (
 
 ## Resultado de las pruebas offline (`tests/run-offline-tests.sh`)
 
-Estado actual (sincronización con la PR a `2d36d7d`, 2026-10-29): **skill 216/216, kit 640/640** (tras la ampliación del paso 14 eran 113 y 351). Antes (solo aprovisionamiento/teardown): 56/56. Esa primera tanda: 56/56 OK con datos ficticios (111111111111 / `demo-x`) y `aws`/`kubectl`/`docker` falsos: `bash -n` de todos los scripts, render de las 3 plantillas sin `${` y con `yq` parseando,
+Estado de esa tanda (sincronización con la PR a `2d36d7d`, 2026-10-29; ver al final la de `1a1bbda`): **skill 216/216, kit 640/640** (tras la ampliación del paso 14 eran 113 y 351). Antes (solo aprovisionamiento/teardown): 56/56. Esa primera tanda: 56/56 OK con datos ficticios (111111111111 / `demo-x`) y `aws`/`kubectl`/`docker` falsos: `bash -n` de todos los scripts, render de las 3 plantillas sin `${` y con `yq` parseando,
 dry-run del teardown sin ninguna operación de escritura, guarda (llamador = recurso a borrar, `OrganizationAccountAccessRole`, fase 9 como `cloud-provisioner`), cuenta incorrecta,
 confirmaciones erróneas / sin tty, y orden de borrado en `--apply` simulado. Nuevos: `apps-layer.sh` contra un kit falso (delegación de variables, `APPS_LAYER_DIR` ignorada, dry-run de `s3 apply`/`render`, rechazo de `launch --run`, prereqs con `gh`/tenant/cuenta), y fase A del teardown (dry-run sin escrituras, orden A antes de 1, contenedores por nombre/imagen, enlace simbólico, stack ajeno, guarda de `<C>-s3`, `--delete-s3-requisites` con confirmación del bucket). No probado: shellcheck (no instalado), ninguna operación real en AWS, `clusterctl move`, `keos install`.
 
@@ -99,3 +99,21 @@ Solo cambian en la PR la guía `instalacion-cliente-legacy.md` y dos scripts de 
 - **Deliberadamente no adoptado ni implementado**: flavour `custom` (documentado el mecanismo), valores/hosts/sizing del cliente, `cct-ajustes-cliente.sh`, `keos-cluster-snapshot.sh`, `PgBackup`/PVC escalonados a mano y la sección 9 de la guía (parar/arrancar el clúster) como **follow-up para una skill nueva**.
 - **Riesgos nuevos o reformulados** (`references/open-risks.md`): nº 17 (formato `BACKUPS_S3_BUNDLE`, sigue abierto), 18-21 (parche pushgateway no persistente, flags probados solo con mocks, `CUSTOM`/`enviroment-ready`/`backups-env` sin ejecutar, sizing en clústeres pequeños).
 - Pruebas: la skill añade la sección 10 (render con/sin flags, `render-postinstall`, espejo en `1-aws-cluster/`), las del wrapper (`backups-env`, `CUSTOM`) y la de `override_charts_values/` en la fase 8; el kit, `CUSTOM` y `backups-env.sh`. Todo con mocks: ninguna operación real en AWS ni contra `apps-installer`.
+
+## Sincronización con la PR keos-fleet#220 a `1a1bbda` (2026-11-12; antes `2d36d7d`)
+
+HEAD de la PR `1a1bbdaf` (2026-11-05), sin comentarios ni reviews. Desde `2d36d7d`: 10 commits de Francisco con algo legacy; el diff de los bloques de código de su guía solo muestra tres cosas técnicas; el resto es condensación (1307 → 1044 líneas), renombrado del directorio a `clusters/igualdad-keos-desa-gitops/` y un documento nuevo de migración a GitOps. Alcance: solo lo que afecta al aprovisionamiento/configuración del legacy.
+
+| Origen en la PR | Efecto en nuestra instalación | Decisión |
+|---|---|---|
+| `a471c0fa` JVM opts de HDFS (`ParallelGCThreads=0` con CPU request < 1) | Ninguno (kit S3, sin hdfs) | Documentado (gotcha, variante HDFS) |
+| `a73962b6` `DISCOVERY_ADMIN_GROUP` debe existir en GoSec (si no, 403 y `apps-installer` se detiene) | Ninguno: usamos `<tenant>-stratio-owners`; pero nada lo protegía | Documentado + comentario en `tenant.yaml.tpl` + test que fija las líneas de `DISCOVERY_ADMIN_GROUP` e `INTELLIGENCE_ADMIN_GROUPS` |
+| `4899e64c` PVC `<pgcluster>-backup-pvc` quedan `Pending` hasta el primer backup | Ya usamos ese nombre; `check-apps-layer.sh` no mira PVC | Documentado (gotchas, steps 14h, guía, README del kit) |
+| `a56b77fb` guía resumida + tabla "Qué se ha copiado del cliente" | Nueva numeración de la guía (6.2 `override_vars`, 6.3 `override_charts_values`, 6.4 instalación, "Operación" sin número) | Mapa del `README.md` actualizado; filas nuevas en "Known upstream deltas not adopted" |
+| Prosa eliminada: `sis` y `ldapsync-internal` en `Error` ~10 min tras arrancar | No documentado antes | Documentado (gotchas, README) |
+| functional-monitoring: ahora es un "prerrequisito ya subido al ECR" | Es del ECR de Francisco; nuestras notas siguen siendo más completas | Documentado en gotchas |
+| `migracion-legacy-gitops.md` (nuevo) | Lista lo que el legacy debe ofrecer para migrar (flux y vpa en `kube-system`, `keos-operator`, IRSA external-dns, velero IRSA con BSL `Available`, EFS): ya lo produce el workspace | No adoptado; puntero en README |
+| `de0ccd4c` clave KMS: `cancel-key-deletion` por ARN | Aplica si tras migrar se borra la clave | Nota en `teardown.md` y `legacy-eks-uninstall` |
+| Commits de `dgutierrez` (GitOps): clamav con StorageClass `keos` (PLT-5195), rocket 4.1.0, credencial S3 | No cambia ningún flag | Notas para quien migre, en gotchas |
+
+Decisiones de la persona usuaria: la deriva de `apps-layer-automation@branch-15.1-0.1` desde 10-29 (`ffecfe8f` y `KEOS_WORKSPACE_DIR`, `a9460607` Rocket Guaranteed, tags `15.1-0.1.0-M1/M2`, `.lst` de `branch-15.1` ya en 15.1.1) **queda fuera**: se tratará con su pull de la imagen; solo se documenta `M2` como alternativa en `kit.env.example`. keos-installer se queda en 1.4.2 como la guía; como salvaguarda el parche `sed` de PLT-5162 se omite con `KEOS_INSTALLER_VERSION` >= 1.4.9 (la 1.4.9 lo corrige; con el `sed` se corrompería el ConfigMap).

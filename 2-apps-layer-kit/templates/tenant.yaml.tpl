@@ -172,6 +172,8 @@ tenants:
         DISCOVERY_HAPROXY_HOST: discovery.${tenantId}.${external_domain}
         DISCOVERY_HAPROXY_PATH: "/discovery"
 #%end
+        # Debe ser un grupo que exista en GoSec: con uno inexistente el post-install de discovery da 403 al crear la BD de
+        # Virtualizer y apps-installer se detiene (PR keos-fleet#220, a73962b6). <tenant>-stratio-owners lo crea el tenant.
         DISCOVERY_ADMIN_GROUP: ${TENANT_NAME}-stratio-owners
         DISCOVERY_USE_GROUP_WHITELIST: false
     - name: intelligence

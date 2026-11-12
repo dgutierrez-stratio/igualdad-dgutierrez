@@ -369,6 +369,13 @@ ord="$(grep -nE '^(keos monitoring|keos backup velero|keos backup schedule vault
 ! grep -qiE 'password|secret|token|AKIA|access_key|LLM' <<<"$out" && ! grep -qiE 'password|secret|token|AKIA|access_key|LLM' <<<"$(pi "$P3")" && pass "(e) la salida no contiene palabras de secretos" || fail "(e) la salida menciona secretos"
 out="$(pi "$P5")"; grep -q '^keos backup velero$' <<<"$out" && ! grep -q '^keos monitoring$' <<<"$out" && ! grep -q 'keos falco' <<<"$out" && ! grep -q 'AVISO: falta' <<<"$out" && pass "(e) solo ENABLE_BACKUP_VELERO: solo el bloque de velero (override_charts_values presente, sin aviso)" || fail "(e) bloque de velero aislado"
 P9="$(mk13 mon ENABLE_MONITORING=true)"; out="$(pi "$P9")"; grep -q '^keos monitoring$' <<<"$out" && grep -q 'PLT-5162' <<<"$out" && pass "(e) pushgateway activo (plantilla): el parche PLT-5162 acompaña a keos monitoring" || fail "(e) parche pushgateway"
+# PLT-5162 lo corrige keos-installer 1.4.9: con >= 1.4.9 el parche con sed se omite (corromperia el ConfigMap); con 1.4.2 (defecto) aparece
+P9b="$(mk13 mon149 ENABLE_MONITORING=true KEOS_INSTALLER_VERSION=1.4.9)"; out="$(pi "$P9b")"
+grep -q '^keos monitoring$' <<<"$out" && ! grep -q 'kubectl -n keos-metrics' <<<"$out" && grep -q '1.4.9 ya lo corrige' <<<"$out" && pass "(e) keos-installer 1.4.9: sin parche PLT-5162 (mensaje explicativo)" || fail "(e) parche PLT-5162 con 1.4.9"
+P9c="$(mk13 mon1410 ENABLE_MONITORING=true KEOS_INSTALLER_VERSION=1.4.10)"; out="$(pi "$P9c")"
+! grep -q 'kubectl -n keos-metrics' <<<"$out" && pass "(e) keos-installer 1.4.10 (orden de versiones, no lexicografico): sin parche" || fail "(e) 1.4.10 trata como < 1.4.9"
+P9d="$(mk13 mon148 ENABLE_MONITORING=true KEOS_INSTALLER_VERSION=1.4.8)"; out="$(pi "$P9d")"
+grep -q 'kubectl -n keos-metrics get cm' <<<"$out" && pass "(e) keos-installer 1.4.8: el parche PLT-5162 sigue" || fail "(e) 1.4.8 sin parche"
 mkdir -p "$P9/override_vars"; sed 's/^prometheus_pushgateway_enabled:.*/prometheus_pushgateway_enabled: false/' "$P3/override_vars/demo-x.yaml" > "$P9/override_vars/demo-x.yaml"
 out="$(pi "$P9")"; grep -q '^keos monitoring$' <<<"$out" && ! grep -q 'kubectl -n keos-metrics' <<<"$out" && grep -q 'omitido' <<<"$out" && pass "(e) pushgateway desactivado en override_vars: sin parche" || fail "(e) parche con pushgateway desactivado"
 P10="$(mk13 vsin ENABLE_BACKUP_VELERO=true ENABLE_BACKUP_SCHEDULE=true ENABLE_FALCO=true)"; out="$(pi "$P10")"

@@ -36,6 +36,10 @@ LOG="$(flag ENABLE_CENTRAL_LOGGING)"; FAL="$(flag ENABLE_FALCO)"
 # prometheus_pushgateway_enabled: true; la plantilla lo lleva a true siempre, así que sin fichero se asume true.
 PG=true
 if [[ -f "$OVF" ]] && ! grep -Eq '^prometheus_pushgateway_enabled:[[:space:]]*true' "$OVF"; then PG=false; fi
+# PLT-5162 se corrige en keos-installer 1.4.9 (el ConfigMap ya sale valido y el sed del parche lo corromperia): con >= 1.4.9 se omite.
+# Se usa la version de cluster.env (1.4.2 por defecto, la de la guia de la PR).
+KV="${KEOS_INSTALLER_VERSION:-1.4.2}"
+if [[ "$PG" == true && "$(printf '%s\n%s\n' "$KV" 1.4.9 | sort -V | head -1)" == "1.4.9" ]]; then PG=fixed; fi
 
 if [[ "$MON$VEL$SCH$LOG$FAL" != *true* ]]; then
   cat <<'EOF'
@@ -79,7 +83,11 @@ kubectl -n keos-metrics get hr pushgateway   # Ready True
 EOF
   else
     echo
-    echo "# (parche PLT-5162 omitido: prometheus_pushgateway_enabled no está activo en $OVF)"
+    if [[ "$PG" == fixed ]]; then
+      echo "# (parche PLT-5162 omitido: keos-installer $KV >= 1.4.9 ya lo corrige; aplicarlo con sed corrompería el ConfigMap)"
+    else
+      echo "# (parche PLT-5162 omitido: prometheus_pushgateway_enabled no está activo en $OVF)"
+    fi
   fi
 fi
 

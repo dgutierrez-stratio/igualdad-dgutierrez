@@ -205,6 +205,7 @@ para el loader** (el `.lst` fresco sigue siendo obligatorio: `intelligence` lo u
   (`pit/post-deploy.sh`, `datamarket-agent/post-install.sh`) asignan roles y grupos de GoSec que crea `genai-api`; no hay `LLM_TOKEN` en el YAML
   y se quitan `ROCKET_GENAI_ENABLED`/`INTELLIGENCE_GENAI_ENABLED` y `DEPENDENCIES_GENAI_*`. El render avisa.
 - Ninguna app genai-* tiene rama S3 ni HDFS: solo usan Postgres/OpenSearch y el token.
+- **`DISCOVERY_ADMIN_GROUP` / `INTELLIGENCE_ADMIN_GROUPS`** van fijos a `<tenant>-stratio-owners` en `templates/tenant.yaml.tpl` (grupo que crea el tenant). Deben existir en GoSec: con un grupo inexistente el post-install de discovery da 403 al crear la BD de Virtualizer y `apps-installer` se detiene (PR keos-fleet#220, `a73962b6`; `discovery/pre-install.sh` solo crea `<tenant>-discovery-admins` e ignora la variable). Un test del kit fija ambas líneas.
 
 ## Decisiones del caso de uso (qué hace el render)
 
@@ -311,7 +312,7 @@ cd /apps-layer && enviroment-ready --backups backups.env
 ```
 
 - **Qué hace en el clúster**: `keos backup create idp vault` (volúmenes en `keos-backup`), escribe `override_vars/velero.yaml` en el workspace si no existe y **relanza `keos backup velero`**, y para cada PgCluster crea un PVC
-  `<pg>-backup-pvc` de 40Gi y un `PgBackup` diario a las 01:00 si no existen (el cliente los tiene escalonados y con PVC de 50/50/80Gi; la guía los crea antes con `kubectl apply`: es sizing del cliente, no se adopta). Solo lanza un backup
+  `<pg>-backup-pvc` de 40Gi y un `PgBackup` diario a las 01:00 si no existen (el cliente los tiene escalonados y con PVC de 50/50/80Gi; la guía los crea antes con `kubectl apply`: es sizing del cliente, no se adopta). Los PVC quedan `Pending` (StorageClass `WaitForFirstConsumer`) hasta la primera ejecución del backup: es normal. Solo lanza un backup
   **puntual** de IdP y vault; los diarios (00:00 IdP, 00:05 vault, 7 días) son `keos backup schedule vault idp` desde la shell de keos-installer (paso 13b de la skill).
 - **Requisito para que Velero funcione con IRSA**: el override `keos-backup-velero.yaml` (`credentials.useSecret: false`) que genera `render-keos.sh` con `ENABLE_BACKUP_VELERO=true` en `cluster.env`; sin él la `BackupStorageLocation`
   puede quedar `Unavailable`. Comprueba: `kubectl -n keos-backup get bsl aws` (debe estar `Available`).

@@ -11,7 +11,7 @@ Fecha: 2026-10-27. Tarea de solo lectura: no se ha modificado nada en AWS, en el
 Leyenda de procedencia usada en todo el informe:
 
 - **[CÓDIGO]**: leído en el repo `Stratio/apps-layer-automation`, rama `branch-15.1-0.1` (HEAD `8ca2450`, 2026-10-23), o en sus docs.
-- **[PR]**: viene de la guía `instalacion-cliente-legacy.md` de la PR 220 (HEAD `2d36d7d` el 2026-10-29; el análisis original se hizo sobre `f36fe83`), no del proyecto.
+- **[PR]**: viene de la guía `instalacion-cliente-legacy.md` de la PR 220 (HEAD `2d36d7d` el 2026-10-29; el análisis original se hizo sobre `f36fe83`; sincronizada después con `1a1bbda`, 2026-11-05, sin cambios en lo que usa este kit salvo notas: histórico, no se reescribe; la ruta `clusters/igualdad-keos-desa/` de esta página pasó a `clusters/igualdad-keos-desa-gitops/`), no del proyecto.
 - **[VERIFICADO]**: lo he comprobado yo, solo lectura, contra el clúster, la imagen local o el registry.
 - **[SUPOSICIÓN]**: deducción mía, no probada.
 

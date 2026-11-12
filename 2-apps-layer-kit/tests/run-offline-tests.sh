@@ -67,6 +67,8 @@ for prof in full minimal; do for hosts in false true; do
   check "$label: aparece connector-s3" jq -e '[.. | objects | select(has("name")) | .name] | index("connector-s3") != null' <<<"$TJ"
   check "$label: aparece S3_BUCKET_NAME correcto" jq -e '.[0].tenants[0].env.S3_BUCKET_NAME == "demo-x-internal-111111111111"' <<<"$TJ"
   check "$label: tenant dev, grupos dev-stratio-owners" bash -c "grep -q 'name: dev\$' '$T' && grep -q 'dev-stratio-owners' '$T'"
+  # Un grupo de administracion inexistente en GoSec da 403 en el post-install de discovery (PR#220 a73962b6): fijar ambas variables
+  check "$label: DISCOVERY_ADMIN_GROUP e INTELLIGENCE_ADMIN_GROUPS = dev-stratio-owners (grupo existente)" bash -c "grep -qE '^ +DISCOVERY_ADMIN_GROUP: dev-stratio-owners\$' '$T' && grep -qE '^ +INTELLIGENCE_ADMIN_GROUPS: dev-stratio-owners\$' '$T'"
   check "$label: VIRTUALIZER_CREATE_LOADBALANCER false" jq -e '[.. | objects | select(has("VIRTUALIZER_CREATE_LOADBALANCER")) | .VIRTUALIZER_CREATE_LOADBALANCER][0] == false' <<<"$TJ"
   if [[ "$hosts" == false ]]; then
     check "$label: sin *_HAPROXY_HOST/PATH/SERVER_HOST por tenant" jq -e '[.. | objects | keys[] | select(test("HAPROXY_HOST$|HAPROXY_PATH$|SERVER_HOST$"))] | length == 0' <<<"$TJ"

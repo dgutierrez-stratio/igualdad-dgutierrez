@@ -15,6 +15,7 @@ El finder lista **todo** lo que hay en la cuenta/región y el remover borra **to
 ## Por qué cada protegido (comprobado en la cuenta de igualdad, 2026-11)
 
 - **VPC por defecto**: el remover borra subnets y route tables e incluso desacopla y borra el IGW antes de la VPC (`_delete_vpc`). Se recrea con `create-default-vpc`, pero con IDs nuevos.
+- **Clave KMS de una migración a GitOps previa** (`alias/flux-<cluster>`, PR keos-fleet#220): si quedó `PendingDeletion` y hay que reutilizarla, `cancel-key-deletion` se hace por **ARN**, no por alias. La skill no la borra ni la rescata.
 - **KMS gestionadas por AWS** (`alias/aws/ebs|efs|secretsmanager`): `schedule_key_deletion` falla, pero no hay motivo para intentarlo (y la automation de Stratio usa `--no-kms`).
 - **Roles de servicio** (`AWSServiceRoleForAutoScaling`, `…EKSNodegroup`, `…ElasticFileSystem`) no están en la whitelist del finder; AWS los recrea solo en el primer uso.
 - **`OrganizationAccountAccessRole`**: el acceso a la cuenta. Solo se comprueba su confianza y sus políticas (foto previa vs. verify); no hay roles SSO en estas cuentas.

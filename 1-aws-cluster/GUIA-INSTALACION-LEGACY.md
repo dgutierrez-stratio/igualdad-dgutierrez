@@ -11,7 +11,7 @@
 > **Convención:** salvo que se indique otra cosa, los comandos se ejecutan **desde la raíz del workspace** (`cd /stratio/e/igualdad`).
 
 Guía reutilizable para crear un clúster como el del cliente (cloud-provisioner con `gitops_enabled: false`),
-basada en `instalacion-cliente-legacy.md` de la PR Stratio/keos-fleet#220 (PLT-4419), sincronizada con su HEAD **`2d36d7d`** (2026-10-29). Todo lo específico de
+basada en `instalacion-cliente-legacy.md` de la PR Stratio/keos-fleet#220 (PLT-4419), sincronizada con su HEAD **`1a1bbda`** (2026-11-05; sincronización anterior `2d36d7d`, 2026-10-29). Entre ambas solo cambian, para el legacy, tres notas técnicas (grupo de administración de discovery, PVC de backup `Pending`, JVM de HDFS: no aplica a S3) y una reescritura de la guía; ver `README.md` raíz y `references/gotchas.md` de la skill. Todo lo específico de
 un entorno (nombre, cuenta, dominio, red, versiones) está en `cluster.env` (raíz del workspace); para otro clúster basta con otro
 `cluster.env` y repetir los pasos (los scripts de render aceptan la ruta de otro `cluster.env` como argumento).
 
@@ -228,7 +228,7 @@ Se genera, no se edita a mano. `render-cluster.sh` lee `cluster.env` (raíz), `v
 `1-aws-cluster/estado/cluster.yaml`; falla si falta algo o queda algún `${...}` sin resolver. Para otro clúster:
 `1-aws-cluster/render-cluster.sh /ruta/otro/cluster.env` (overrides por entorno: `OUT`, `TPL`, `NETWORK_JSON`, `STATE_DIR`).
 
-Según la PR a `2d36d7d` el descriptor lleva `helm_repository.url: oci://$ECR_REGISTRY/$KEOS_HELM_PATH` (por defecto `helm-15.1`; antes era `/helm`; si `KEOS_HELM_PATH` falta en `cluster.env`, el render usa `helm-15.1`) y
+Según la PR (desde `2d36d7d`) el descriptor lleva `helm_repository.url: oci://$ECR_REGISTRY/$KEOS_HELM_PATH` (por defecto `helm-15.1`; antes era `/helm`; si `KEOS_HELM_PATH` falta en `cluster.env`, el render usa `helm-15.1`) y
 `control_plane.aws.logging.authenticator: true` (antes `false`; sin flag). `cluster_operator_version` se mantiene en `0.7.4` (la guía de la PR también lo fija).
 
 ```bash
@@ -336,7 +336,7 @@ release `flux` presente, proveedor OIDC asociado y zona Route53 de `$EXTERNAL_DO
 
 ## Fase 2: de cloud-provisioner a `keos install`
 
-Basada en las secciones 5 y 6 de la PR (HEAD `2d36d7d`). Con el clúster creado, keos-installer 1.4.2 necesita en la
+Basada en las secciones 5 y 6.1-6.4 de la PR (HEAD `1a1bbda`; la guía de la PR se renumeró: antes 6.2 incluía `override_charts_values` y 6.3 era la instalación). Con el clúster creado, keos-installer 1.4.2 necesita en la
 cuenta: zonas DNS y rol IRSA de external-dns, bucket y rol IRSA de velero, y el EFS de su StorageClass. Los pasos
 8-11 **crean recursos en AWS**; se hacen uno a uno con confirmación. Los ficheros temporales (JSON de políticas)
 van a `1-aws-cluster/estado/.work/` (variable `$WORK` del paso 7), no a `/tmp`.
@@ -591,7 +591,7 @@ cd /stratio/e/igualdad && unset APPS_LAYER_DIR             # una APPS_LAYER_DIR 
 #   cd /apps-layer && enviroment-ready --backups backups.env
 ```
 
-- **Qué hace `--backups` en el clúster**: `keos backup create idp vault` (backup puntual; volúmenes en `keos-backup`), escribe `override_vars/velero.yaml` en el workspace si no existe y **relanza `keos backup velero`**, y para cada PgCluster (`postgreskeos`, `pg-meta`, `pg-data` en el cliente) crea un PVC `<pg>-backup-pvc` de 40Gi y un `PgBackup` diario a las 01:00 si no existen.
+- **Qué hace `--backups` en el clúster**: `keos backup create idp vault` (backup puntual; volúmenes en `keos-backup`), escribe `override_vars/velero.yaml` en el workspace si no existe y **relanza `keos backup velero`**, y para cada PgCluster (`postgreskeos`, `pg-meta`, `pg-data` en el cliente) crea un PVC `<pg>-backup-pvc` de 40Gi y un `PgBackup` diario a las 01:00 si no existen. Esos PVC quedan `Pending` (StorageClass `WaitForFirstConsumer`) hasta la primera ejecución de cada backup: es normal, no un fallo.
   Los diarios de IdP y vault son los del paso 13b (`keos backup schedule vault idp`). El cliente los tiene escalonados con PVC de 50/50/80Gi, creados a mano antes: es sizing del cliente, **no se adopta**.
 - **Es el bucket y el rol IRSA de Velero** (paso 10), no el bucket opcional `ENABLE_BACKUPS_BUCKET` de la fase 3 (ese es otro, con usuario IAM de claves estáticas, para migrar a GitOps). Comprueba después `kubectl -n keos-backup get bsl aws` (`Available`); con IRSA exige el override `keos-backup-velero.yaml` del paso 12.
 - **Reporters (aún más opcional)**: `enviroment-ready --reporter backups.env` (exige un fichero aunque no lo use) crea el namespace `keos-reports`, la `GlobalNetworkPolicy` `allow-all-traffic-from-keos-reports` y tres HelmReleases (`postgresql-statistics-report`, `keos-versions-reporter`, `functional-monitoring`). Avisos de la guía:

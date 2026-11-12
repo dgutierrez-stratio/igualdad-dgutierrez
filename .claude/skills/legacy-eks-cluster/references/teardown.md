@@ -87,6 +87,8 @@ AWS/SSO, y el perfil/credenciales del usuario en `~/.aws`. Si el llamador coinci
 
 Desde que existe la skill hermana **`legacy-eks-uninstall`** (empaquetada con esta con `skills/package-skills.sh`), el barrido con finder/remover ya no se hace a mano: esa skill identifica y confirma el clúster, filtra los recursos que no deben borrarse (VPC por defecto, KMS de AWS, roles de servicio, `OrganizationAccountAccessRole`), ejecuta el remover en pasadas y verifica que el acceso a la cuenta queda intacto. Supone mergeada la PR Stratio/aws-marketplace-toolkit#51 (handlers de EFS, Route53 y ASG). Lo que sigue describe el uso manual anterior.
 
+> Si el clúster se migró antes a GitOps con KMS (PR keos-fleet#220, `migracion-legacy-gitops.md`) y la clave `alias/flux-<cluster>` quedó programada para borrado, se cancela por **ARN**, no por alias: `aws kms cancel-key-deletion --key-id <arn>` (commit `de0ccd4c`). El finder/remover no la trata como propia de esta instalación (clave de la migración).
+
 
 Ya tienes el tuyo (entorno conda `marketplace`, `aws-marketplace-finder`/`remover` en `/stratio/aws/aws-marketplace-toolkit/`, que recopila recursos a un JSON y borra los de ese fichero). Úsalo:
 - **en lugar de** `teardown.sh` si el clúster ya no responde y quieres un barrido por cuenta/región sin el flujo CAPI, o si `teardown.sh` aborta por algo que no quieres resolver;

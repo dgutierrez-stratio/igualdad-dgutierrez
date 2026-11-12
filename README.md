@@ -20,10 +20,11 @@ Phases (each has a guide step range and scripts):
 ## Upstream origin and how to sync (do this when asked to "bring the latest changes")
 The method comes from a colleague's PR — **Francisco (GitHub `forselli-stratio`)**:
 - **PR: `Stratio/keos-fleet#220`** (Jira PLT-4419), head branch from the fork `forselli-stratio/keos-fleet`, mirrored as `pr-sync/220/PLT-4419`.
-  Guide in the PR: `clusters/igualdad-keos-desa/instalacion-cliente-legacy.md`. It is a living document: Francisco keeps adding to it.
+  Guide in the PR: `clusters/igualdad-keos-desa-gitops/instalacion-cliente-legacy.md` (renamed from `clusters/igualdad-keos-desa/` in `38da5767`, 2026-10-30; the old path only exists at `2d36d7d`). It is a living document: Francisco keeps adding to it.
   Never edit, comment on or push to that PR/fork.
-- Last synced by us: **2026-10-29, PR HEAD `2d36d7d`** (history seen: `6790c2e` → `e10f1d0` → `f36fe83` → `a47a1bc` → `05c7d61` → … → `2d36d7d`; 17 commits since `a47a1bc`, messages in the PR, no review comments).
-  Only 3 files change in the PR (`clusters/igualdad-keos-desa/`): the guide and two client scripts we do not adopt (below). Anything newer than `2d36d7d` is unreviewed.
+- Last synced by us: **2026-11-12, PR HEAD `1a1bbda`** (PR updated 2026-11-05; no review comments). Previous sync: `2d36d7d` (2026-10-29; history seen: `6790c2e` → `e10f1d0` → `f36fe83` → `a47a1bc` → `05c7d61` → … → `2d36d7d`).
+  The PR has 30 files in two directories: `clusters/igualdad-keos-desa-gitops/` holds the **legacy** guide (`instalacion-cliente-legacy.md`), two client scripts we do not adopt (`cct-ajustes-cliente.sh`, `keos-cluster-snapshot.sh`; unchanged since `2d36d7d`), the GitOps installation with its guide and `migracion-legacy-gitops.md` (legacy → GitOps migration, **not adopted**: that flow has its own skills `stratio:migrate-system-services` / `stratio:migrate`); `clusters/igualdad-keos-desa/` is the GitOps cluster regenerated with `flux keos` for that migration (`ffb1415a`). The rest of the diff is merges of `main` and the GitOps clusters `eosdev` / `igualdad-dgutierrez` (own work, other scope). Anything newer than `1a1bbda` is unreviewed.
+  Delta `2d36d7d` → `1a1bbda` for the legacy install: only three technical items (HDFS JVM opts: n/a, we are S3; `DISCOVERY_ADMIN_GROUP` must exist in GoSec; backup PVCs stay `Pending` until the first backup); everything else is a rewrite of the guide (1307 → 1044 lines) with a new table "Qué se ha copiado del cliente". Documented in `references/gotchas.md`; the full table is in `.claude/skills/legacy-eks-cluster/PLAN.md`.
 
 Sync procedure:
 ```bash
@@ -33,22 +34,24 @@ gh api repos/Stratio/keos-fleet/pulls/220/comments  # review comments, if any
 ```
 Compare against the last-synced SHA, then update only what changed, keeping our deliberate deviations (next section). Map of guide section → our files:
 
-| PR guide section | Ours |
+| PR guide section (numbering at `1a1bbda`) | Ours |
 |---|---|
+| "Qué se ha copiado del cliente" (table of accepted / pending differences) | the lists "Adopted" / "Known upstream deltas not adopted" below |
 | 1 IAM user, 2 ECR pull-through policy | `1-aws-cluster/GUIA-INSTALACION-LEGACY.md` steps 1-2 |
 | 3 VPC | `1-aws-cluster/create-test-vpc.sh`, step 3 |
 | 4 cloud-provisioner descriptor (`helm-15.1` chart repo, `logging.authenticator: true`) | `1-aws-cluster/cluster.yaml.tpl`, `render-cluster.sh` (`KEOS_HELM_PATH`; check cloud-provisioner/operator versions in `cluster.env`), guide step 4 |
 | 5 AWS prerequisites of keos-installer (Route53, IRSA external-dns, Velero, EFS) | guide steps 7-11, skill `references/steps.md` |
 | 6.1 `keos.yaml` (`keos.backup.storage_class`, `keos.security` clamav/falco) | `keos.yaml.tpl` + `render-keos.sh` blocks behind `ENABLE_BACKUP_VELERO`, `KEOS_ENABLE_CLAMAV`, `ENABLE_FALCO`; guide step 12 |
-| 6.2 `override_vars`, chart overrides (`velero_enable_snapshot_volumes`, `keos-backup-velero.yaml` with `useSecret: false`), flavour `custom` | `override_vars.yaml.tpl` + `render-keos.sh` (`ENABLE_BACKUP_VELERO` only; flavour `custom` and client overrides **not adopted**, see below) |
-| 6.3 `docker run`, `keos install` | guide step 13 |
-| 6.3 after `keos install` (`keos monitoring` + PLT-5162 patch, `keos backup velero`, `keos backup schedule vault idp`, `keos central-logging`, `keos falco`) | **new optional step 13b**: `render-postinstall.sh` (skill `scripts/` and `1-aws-cluster/`; prints commands, runs nothing), flags `ENABLE_MONITORING`, `ENABLE_BACKUP_VELERO`, `ENABLE_BACKUP_SCHEDULE`, `ENABLE_CENTRAL_LOGGING`, `ENABLE_FALCO` |
+| 6.2 `override_vars` and flavour `custom` | `override_vars.yaml.tpl` + `render-keos.sh` (`velero_enable_snapshot_volumes` only with `ENABLE_BACKUP_VELERO`; flavour `custom` and client overrides **not adopted**) |
+| 6.3 `override_charts_values` (`keos-backup-velero.yaml` with `useSecret: false`; VPA / CCT client overrides) | `render-keos.sh` with `ENABLE_BACKUP_VELERO` (only the velero one; the others are the client's, not adopted) |
+| 6.4 `docker run`, `keos install` | guide step 13 |
+| 6.4 after `keos install` (`keos monitoring` + PLT-5162 patch, `keos backup velero`, `keos backup schedule vault idp`, `keos central-logging`, `keos falco`) | **optional step 13b**: `render-postinstall.sh` (skill `scripts/` and `1-aws-cluster/`; prints commands only; the PLT-5162 patch is omitted with `KEOS_INSTALLER_VERSION` >= 1.4.9, which fixes it) |
 | 7.1-7.3 apps-layer-automation | `2-apps-layer-kit/` (templates, scripts, README, docs/INFORME.md), guide/skill step 14 |
 | 7.2 `ENVIRONMENT_SIZE: CUSTOM` | `2-apps-layer-kit/`: `CUSTOM` with our own overlay `templates/sizes-custom.env` (+ `CUSTOM_SIZES_FILE`); no `sizes/CUSTOM` exists upstream |
 | 7.4 Command Center tweaks (`cct-ajustes-cliente.sh`) | not adopted; technique + CCT 15.1 `SecretsBundle intelligence` bug documented in the kit README |
-| 7.5 backups, 7.6 reporters (`enviroment-ready --backups/--reporter`) | **new optional step 14h**: kit `scripts/backups-env.sh` (writes `backups.env`, runs nothing), skill `apps-layer.sh backups-env` |
-| 8 AWS removal | guide step 14 / skill teardown |
-| 9 stop / start the cluster | **not implemented** (follow-up, below) |
+| 7.5 Backups, 7.6 Reporters (`enviroment-ready --backups/--reporter`) | **optional step 14h**: kit `scripts/backups-env.sh` (writes `backups.env`, runs nothing), skill `apps-layer.sh backups-env` |
+| "Operación" / Eliminar los recursos de AWS (finder + remover) | guide step 14 / skills `legacy-eks-cluster` teardown and `legacy-eks-uninstall` |
+| "Operación" / Parar y arrancar el clúster | **not implemented** (follow-up, below) |
 
 After a sync, update the skill (`.claude/skills/legacy-eks-cluster/`: `references/*.md`, scripts) and the guide together, run both offline
 test suites, and record the new synced SHA in this README.
@@ -58,15 +61,18 @@ test suites, and record the new synced SHA in this README.
 Why opt-in: the guide marks nothing as mandatory (everything is "as the client has it"), except the technical requirement `credentials.useSecret: false` for Velero with IRSA, which is generated only when `ENABLE_BACKUP_VELERO=true`.
 Three flags change `keos.yaml` (`ENABLE_BACKUP_VELERO`, `ENABLE_FALCO`, `KEOS_ENABLE_CLAMAV`): decide **before** `keos install` and re-run `render-keos.sh`; the other three only affect step 13b. Enable with `init-cluster.sh --dir D --set ENABLE_X=true`.
 
-**Known upstream deltas not adopted as of `2d36d7d`:**
+**Known upstream deltas not adopted as of `1a1bbda`:**
 - **Flavour `custom`** (`keos.yaml` `flavour: custom` + `override_vars/flavours/custom.yml`): we keep `flavour: production`. Mechanism, if wanted: dump `/stratio/ansible/inventory/group_vars/flavours/production.yml` from the keos-installer 1.4.2 image
   (`docker run --rm --entrypoint cat <image> ...`) into `override_vars/flavours/custom.yml` and edit `keos_flavour_app_definition`. The values the guide applies are the client's (kyverno `admissionController.replicas: 3`, kerberos resources, one OpenSearch node, `*_index_replicas: 0`, VPA 2 replicas, `HEAP_PERCENTAGE` of CCT) and are **not** adopted.
 - Governance ordering changes in the apps file (the guide groups `dg-discovery-manager` with `governance-map`; our `minimal` profile of `root.yaml.tpl` keeps it in its own group; ordering only, not adopted).
 - `--add-host sis.<domain>` next to the `admin.` one (harmless, not added); forced `docker pull` of the SNAPSHOT image before `docker run` (we leave it optional); zip of descriptors `cp`'d inside the container (we mount it instead).
 - Client-specific: `cct-ajustes-cliente.sh` and `keos-cluster-snapshot.sh` (all sizing/security of the client, hardcoded `dev` tenant names; only the `PUT /v2/upgrade` technique is documented in the kit); `PgBackup`/PVC staggered by hand (50/50/80Gi, 00:15/00:30/00:45) before `enviroment-ready --backups`; client hosts and sizes (`rocket.dev.igualdad…`, `DISCOVERY_*`, `DATANODE_*`).
-- **Section 9, stop/start the cluster: FOLLOW-UP for a new skill (not implemented).** Procedure in the guide: pause Cluster API (`kubectl -n cluster-<name> patch cluster <name> --type merge -p '{"spec":{"paused":true}}'`, with the nodes still up) and set every nodegroup to 0
+- **"Operación" (formerly section 9), stop/start the cluster: FOLLOW-UP for a new skill (not implemented).** Procedure in the guide: pause Cluster API (`kubectl -n cluster-<name> patch cluster <name> --type merge -p '{"spec":{"paused":true}}'`, with the nodes still up) and set every nodegroup to 0
   (`aws eks update-nodegroup-config ... minSize=0,desiredSize=0`). To start: nodegroups back to 1 each (`min 1, desired 1, max 2`), and once the 3 nodes exist **delete the webhooks `kyverno-resource-validating-webhook-cfg` and `kyverno-resource-mutating-webhook-cfg`** (with `failurePolicy: Fail` and Kyverno down they block `aws-node`/`kube-proxy`/`calico-node`
-  and leave nodes `NotReady`; Kyverno recreates them), wait for all nodes Ready, rollouts of `kyverno-admission-controller` (keos-core), `capi-controller-manager` and `capa-controller-manager`, then remove the pause. EKS control plane, NAT, NLBs and EBS/EFS keep costing while stopped.
+  and leave nodes `NotReady`; Kyverno recreates them), wait for all nodes Ready, rollouts of `kyverno-admission-controller` (keos-core), `capi-controller-manager` and `capa-controller-manager`, then remove the pause. EKS control plane, NAT, NLBs and EBS/EFS keep costing while stopped. After starting, expect ~10 min until everything settles: `sis` restarts several times until its dependencies are up and the `ldapsync-internal` job leaves `Error` pods from its first attempts (the PR guide dropped this sentence; it still holds).
+- **Client table "Qué se ha copiado del cliente" (new at `a56b77fb`), items the PR marks as not copied / pending and we do not copy either**: Velero schedule `snapshotVolumes: false`; ClamAV resources (200m/1Gi, 1/2Gi); `postgreskeos` parameters (`checkpoint_timeout`, `wal_keep_size`, `tcp_keepalives`, `client_connection_check_interval`, patroni `max_timelines_history: 20`); `kube-system` extras (DaemonSet `copyfail-mitigation`, GlobalNetworkPolicy `aws-efs-csi-driver-allow-traffic-to-aws-imds`); SSO federation (`Saml2FederatedIdp` + `sis_operator_extraenvs.SCIM_IMAGE`); stratio-home menu override; apps outside apps-layer (kong, `bdl-masters-core(-ui)`, `dashboard-resolver`); `dg-postgres-agent-atenpro` (suspended); CronJob `depura-backups-pg-keos` (origin unknown); pending CCT parameters of virtualizer, dg-hdfs-agent, intelligence and rocket; cloud-provisioner client args (cluster-autoscaler, StorageClass tags, `cri_volume`, `private_*`).
+- **`migracion-legacy-gitops.md`** (legacy → GitOps, phase 1 system services): not adopted. It documents what a legacy install must offer to be migrated (release `flux` and `vpa` in `kube-system`, `keos-ops/keos-operator`, IRSA external-dns, Velero IRSA with BSL `aws` `Available`, EFS): our workspace already produces it (Velero/backups only behind their flags). GitOps-only prerequisites (KMS key, kustomize-controller role, Loki bucket) are out of scope. Its `<cluster>-efs-csi` IAM **role** has the same name as our `<cluster>-efs-csi` **policy**: different IAM namespaces, no conflict.
+- **Pending on our side (not from the PR)**: upstream `Stratio/apps-layer-automation@branch-15.1-0.1` has moved since 2026-10-29 (`ffecfe8f` makes `enviroment-ready --reporter` use `${KEOS_WORKSPACE_DIR:-/workspace}` while our `.env` exports the host path; `a9460607` sets Rocket CPU to Guaranteed; immutable tags `15.1-0.1.0-M1/M2` exist). Reviewed by reading code only, not run; to be handled with the next image pull.
 Other upstream sources used: `Stratio/kubernetes-universe` (branch `branch-15.1`: descriptors zip + `universe-images.lst`),
 `Stratio/aws-clusters-automation` (`cloudformation/automations/scripts/cloudformation/template.yaml`, reference for our S3 requisites and backups bucket).
 
