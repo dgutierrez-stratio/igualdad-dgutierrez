@@ -1,8 +1,0 @@
-{
-  "vpc_id": "vpc-0f7b98399966cea8c",
-  "azs": [
-    {"az": "eu-west-1a", "public_subnet": "subnet-0c59882af2131d688", "private_subnet": "subnet-07b3596c1b53be310", "pods_subnet": null, "nat_gateway": "nat-08011c8fc48f10d1e"},
-    {"az": "eu-west-1b", "public_subnet": "subnet-0c1af19dfc33ada17", "private_subnet": "subnet-0b39e391217ffce89", "pods_subnet": null, "nat_gateway": "nat-08011c8fc48f10d1e"},
-    {"az": "eu-west-1c", "public_subnet": "subnet-0a4660ff0faff3644", "private_subnet": "subnet-0dd9b6072b472734f", "pods_subnet": null, "nat_gateway": "nat-08011c8fc48f10d1e"}
-  ]
-}
