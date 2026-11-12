@@ -72,7 +72,7 @@ load_kit_env() {
   APPS_LAYER_DIR="${APPS_LAYER_DIR:-$tmp_base/apps-layer-${CLUSTER_NAME}}"
   warn_unexpected_apps_layer_dir "$tmp_base/apps-layer-${CLUSTER_NAME}" "${pre_set[*]:-}"
   KEOS_WORKSPACE_DIR="${KEOS_WORKSPACE_DIR:-$parent}"
-  APPS_LAYER_IMAGE="${APPS_LAYER_IMAGE:-qa.int.stratio.com/stratio/apps-layer-automation:15.1-0.1.0-SNAPSHOT}"
+  APPS_LAYER_IMAGE="${APPS_LAYER_IMAGE:-qa.int.stratio.com/stratio/apps-layer-automation:15.1-0.1.0-M2}"
   APPS_LAYER_IMAGE_DIGEST="${APPS_LAYER_IMAGE_DIGEST:-}"
   S3_BUCKET_NAME="${S3_BUCKET_NAME:-${CLUSTER_NAME}-internal-${AWS_ACCOUNT_ID}}"
   S3_USER_NAME="${S3_USER_NAME:-${CLUSTER_NAME}-s3}"
@@ -103,8 +103,13 @@ load_kit_env() {
   NLB_SERVICE="${NLB_SERVICE:-ingress-nginx-controller}"
   NLB_IP="${NLB_IP:-}"
   UNIVERSE_ZIP_URL="${UNIVERSE_ZIP_URL:-}"   # vacio = URL derivada de UNIVERSE_VERSION (ver universe_zip_url)
-  # rama de Stratio/kubernetes-universe de la que sale universe-images.lst: por defecto branch-<major>.<minor> de UNIVERSE_VERSION
-  if [[ -z "${UNIVERSE_BRANCH:-}" && "$UNIVERSE_VERSION" =~ ^([0-9]+)\.([0-9]+) ]]; then UNIVERSE_BRANCH="branch-${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"; fi
+  # ref (tag o rama) de Stratio/kubernetes-universe de la que sale universe-images.lst: por defecto el tag UNIVERSE_VERSION
+  # Por defecto el TAG de la version (p. ej. 15.1.0), no la rama branch-<major>.<minor>: la rama avanza (hoy ya es 15.1.1: connectors-loader 2.2.5, rocket 4.1.2...)
+  # y mezclaria imagenes posteriores con los descriptores 15.1.0. Si UNIVERSE_VERSION no es X.Y.Z se cae a branch-<major>.<minor>.
+  if [[ -z "${UNIVERSE_BRANCH:-}" ]]; then
+    if [[ "$UNIVERSE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then UNIVERSE_BRANCH="$UNIVERSE_VERSION"
+    elif [[ "$UNIVERSE_VERSION" =~ ^([0-9]+)\.([0-9]+) ]]; then UNIVERSE_BRANCH="branch-${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"; fi
+  fi
   UNIVERSE_BRANCH="${UNIVERSE_BRANCH:-}"
   # version de connectors-loader que se fija en el env de connectors-management del tenant (como Stratio/keos-fleet#220). Se usa "-" (no ":-"):
   # sin definir => 2.2.0; definida pero VACIA a proposito => no se fija y el hook usa el connectors-loader del universe-images.lst fresco.

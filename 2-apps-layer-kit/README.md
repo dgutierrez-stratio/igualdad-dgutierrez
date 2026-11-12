@@ -3,7 +3,7 @@
 Kit para instalar el caso de uso (tenant `keos` de gobierno + tenant `dev` con virtualizer, rocket, discovery,
 intelligence, genai, etc.) sobre un clúster EKS legacy usando **S3 en vez de HDFS**, y para **repetir todo el proceso
 en otro clúster/cuenta cambiando solo variables**. Reutiliza tal cual la imagen
-`qa.int.stratio.com/stratio/apps-layer-automation:15.1-0.1.0-SNAPSHOT` (rama `branch-15.1-0.1`); no parchea `apps/*`.
+`qa.int.stratio.com/stratio/apps-layer-automation:15.1-0.1.0-M2` (tag inmutable de la rama `branch-15.1-0.1`; el `SNAPSHOT` es mutable); no parchea `apps/*`.
 
 Es la **fase 3** del workspace `/stratio/e/igualdad/` (índice en `../README.md`): la fase 1-2 (VPC, cloud-provisioner,
 `keos install`) está en `../1-aws-cluster/` y en la skill `legacy-eks-cluster`. **La raíz del workspace (`..`) es el workspace
@@ -41,7 +41,7 @@ Prioridad: **variables exportadas en el shell > `kit.env` > `../cluster.env` > d
 | `TENANT_NAME` | `dev` | tenant específico (no puede ser `keos`) |
 | `APPS_LAYER_DIR` | `${TMPDIR:-/tmp}/apps-layer-${CLUSTER_NAME}` | directorio de **ejecución efímero** montado en `/apps-layer` (700; ver abajo) |
 | `KEOS_WORKSPACE_DIR` | `<padre del kit>` (raíz del workspace) | montado en `/workspace` |
-| `APPS_LAYER_IMAGE`, `APPS_LAYER_IMAGE_DIGEST` | imagen SNAPSHOT, vacío | con `sha256:...` (64 hex) se fija `repo:tag@sha256:...`; digest conocido: `sha256:a745cac6f9a30b68e9e5ff5312c0b584ac78ffb2dc955ad3430661617de6d37a` |
+| `APPS_LAYER_IMAGE`, `APPS_LAYER_IMAGE_DIGEST` | imagen `15.1-0.1.0-M2` (inmutable), vacío | con `sha256:...` (64 hex) se fija `repo:tag@sha256:...`; digest local de M2 (pull del 2026-11-12): `sha256:95ea159b7f0e206d6dc5662c3b861dbead468902cf4d4ab0123f9aea34c14ea8` |
 | `S3_BUCKET_NAME` | `${CLUSTER_NAME}-internal-${AWS_ACCOUNT_ID}` | global en AWS |
 | `S3_USER_NAME` | `${CLUSTER_NAME}-s3` | usuario IAM y secreto de Secrets Manager |
 | `STACK_NAME` | `${CLUSTER_NAME}-requisites` | stack CloudFormation mínimo propio |
@@ -59,7 +59,7 @@ Prioridad: **variables exportadas en el shell > `kit.env` > `../cluster.env` > d
 | `LLM_PROVIDER`, `LLM_MODEL` | vacío | opcionales, no secretos; si se definen se escriben en el env del tenant (los defaults de la app son `openai`/`gpt-5.4-mini`) |
 | `KUBECONFIG_SRC` | `$KEOS_WORKSPACE_DIR/1-aws-cluster/estado/kubeconfig-${CLUSTER_NAME}` | origen del `kube-config` (si falta, se genera con `aws eks update-kubeconfig`) |
 | `UNIVERSE_VERSION` | `15.1.0` | versión del universo: nombre del zip y del `.lst` y, por defecto, rama del `.lst` |
-| `UNIVERSE_BRANCH` | `branch-<major>.<minor>` de `UNIVERSE_VERSION` (`branch-15.1`) | rama de `Stratio/kubernetes-universe` de la que se baja `universe-images.lst`; obligatoria si la versión no tiene forma `X.Y...` |
+| `UNIVERSE_BRANCH` | el **tag** `UNIVERSE_VERSION` (`15.1.0`); si la versión no es `X.Y.Z`, `branch-<major>.<minor>` | tag/rama de `Stratio/kubernetes-universe` de la que se baja `universe-images.lst`. Se ancla al tag porque `branch-15.1` ya es 15.1.1 (connectors-loader 2.2.5, rocket 4.1.2) y mezclaría imágenes posteriores con los descriptores 15.1.0; obligatoria si la versión no tiene forma `X.Y...` |
 | `UNIVERSE_ZIP_URL` | `http://qa.int.stratio.com/repository/paas/kubernetes-universe/descriptors/kubernetes-universe-descriptors-${UNIVERSE_VERSION}.zip` | override de la URL del zip |
 | `KIT_AWS_PROFILE`, `KEOS_INSTALLER_EXTRA_ARGS`, `NLB_IP`, `NLB_NAMESPACE`, `NLB_SERVICE` | ver `kit.env.example` | |
 
@@ -171,13 +171,12 @@ La imagen trae un universo embebido (`/apps-layer-automation/universe/`), pero *
 | Fichero (en `$APPS_LAYER_DIR`) | Origen | Montaje en el contenedor |
 |---|---|---|
 | `kubernetes-universe-descriptors-${UNIVERSE_VERSION}.zip` | `curl -fSL` de `http://qa.int.stratio.com/repository/paas/kubernetes-universe/descriptors/<zip>` (VPN) a un temporal, `unzip -t`, tamaño > 0, `mv` atómico; imprime tamaño y sha256 | `-v <zip>:/apps-layer-automation/universe/<zip>` |
-| `${UNIVERSE_VERSION}-universe-images.lst` | `gh api -H 'Accept: application/vnd.github.raw' repos/Stratio/kubernetes-universe/contents/universe-images.lst?ref=${UNIVERSE_BRANCH}` (`branch-15.1`), no vacío y con `connectors-loader`, `mv` atómico | `-v <lst>:/apps-layer-automation/universe/<lst>:ro` |
+| `${UNIVERSE_VERSION}-universe-images.lst` | `gh api -H 'Accept: application/vnd.github.raw' repos/Stratio/kubernetes-universe/contents/universe-images.lst?ref=${UNIVERSE_BRANCH}` (tag `15.1.0` por defecto), no vacío y con `connectors-loader`, `mv` atómico | `-v <lst>:/apps-layer-automation/universe/<lst>:ro` |
 
 Por qué el `.lst`: `apps/connectors-management/post-install.sh` saca de ahí la versión de `connectors-loader` y `apps/intelligence/post-upgrade.sh` la de
-`analytic-environment`. El de la imagen está desfasado (connectors-loader **2.2.0** frente a **2.2.3** en `branch-15.1`, y ~100 imágenes más con bump de patch). Por defecto el kit
+`analytic-environment`. El de la imagen está desfasado (connectors-loader **2.2.0** frente a **2.2.5** en `branch-15.1`, que ya es 15.1.1, y ~100 imágenes más con bump de patch; el tag `15.1.0`, el que usa el kit, trae 2.2.0). Por defecto el kit
 **fija `CONNECTORS_LOADER_VERSION=2.2.0`** en el env de `connectors-management` del tenant (como la PR Stratio/keos-fleet#220, probada solo en HDFS): **con el pin, el hook IGNORA el `.lst`
-para el loader** (el `.lst` fresco sigue siendo obligatorio: `intelligence` lo usa para `analytic-environment` y `connectors-management` lo usa si no hay pin). Para usar el loader del `.lst` fresco (2.2.3 en
-`branch-15.1`) pon `CONNECTORS_LOADER_VERSION=` **vacía** en `kit.env` (la línea no se renderiza); con otro valor se fija ese. `check-apps-layer.sh` informa de qué versión de loader se usará.
+para el loader** (el `.lst` fresco sigue siendo obligatorio: `intelligence` lo usa para `analytic-environment` y `connectors-management` lo usa si no hay pin). Para usar el loader del `.lst` (el del tag usado: 2.2.0 con `15.1.0`) pon `CONNECTORS_LOADER_VERSION=` **vacía** en `kit.env` (la línea no se renderiza); con otro valor se fija ese. `check-apps-layer.sh` informa de qué versión de loader se usará.
 
 - Sin `gh` autenticado con acceso a `Stratio/kubernetes-universe`, o sin VPN, `fetch`/`launch` **paran** con un mensaje claro (no hay modo "usar lo que hubiera").
 - `launch --skip-fetch`: solo si acabas de descargarlos a mano; exige ambos ficheros válidos y avisa si tienen más de 24 h.

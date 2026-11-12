@@ -298,12 +298,12 @@ check "launch imprime docker run con nombre apps-layer-demo-x" bash -c "grep -q 
 check "launch: mounts /apps-layer, /workspace, docker.sock y aws ro" bash -c "grep -q -- '-v $D:/apps-layer' '$W/launch.out' && grep -q -- '-v $W/ws:/workspace' '$W/launch.out' && grep -q 'docker.sock' '$W/launch.out' && grep -q -- '$D/aws:/root/.aws:ro' '$W/launch.out'"
 check "launch: workspace tambien montado en su ruta del host (enviroment-ready --reporter, M1/M2)" bash -c "grep -q -- '-v $W/ws:/workspace' '$W/launch.out' && grep -q -- '-v $W/ws:$W/ws' '$W/launch.out'"
 check "launch: --add-host admin.<dominio>:<IP del NLB>" has "$W/launch.out" "--add-host admin.demo-x.example.test:10.1.2.3"
-check "launch: --net host --cgroupns host + imagen por defecto" bash -c "grep -q -- '--net host' '$W/launch.out' && grep -q -- '--cgroupns host' '$W/launch.out' && grep -q 'qa.int.stratio.com/stratio/apps-layer-automation:15.1-0.1.0-SNAPSHOT' '$W/launch.out'"
+check "launch: --net host --cgroupns host + imagen por defecto" bash -c "grep -q -- '--net host' '$W/launch.out' && grep -q -- '--cgroupns host' '$W/launch.out' && grep -q 'qa.int.stratio.com/stratio/apps-layer-automation:15.1-0.1.0-M2' '$W/launch.out'"
 check "launch: NO ejecuta docker sin --run" bash -c "! grep -q '^docker ' '$MOCK_LOG'"
 check "launch: kubectl solo lectura (get svc)" bash -c "grep -q '^kubectl .*get svc' '$MOCK_LOG' && ! grep -qE '^kubectl .*(apply|delete|exec|patch|create)' '$MOCK_LOG'"
 DIG="sha256:a745cac6f9a30b68e9e5ff5312c0b584ac78ffb2dc955ad3430661617de6d37a"
 EXTRA=(APPS_LAYER_DIR="$D" APPS_LAYER_IMAGE_DIGEST="$DIG"); run_s "$W/o.txt" launch-apps-layer.sh
-check "launch: imagen fijada por digest" has "$W/o.txt" "apps-layer-automation:15.1-0.1.0-SNAPSHOT@$DIG"
+check "launch: imagen fijada por digest" has "$W/o.txt" "apps-layer-automation:15.1-0.1.0-M2@$DIG"
 EXTRA=(APPS_LAYER_DIR="$D" APPS_LAYER_IMAGE_DIGEST="sha256:corto"); if run_s "$W/o.txt" launch-apps-layer.sh; then bad "digest invalido"; else ok "digest invalido aborta"; fi
 EXTRA=(APPS_LAYER_DIR="$D" NLB_IP=10.9.9.9); run_s "$W/o.txt" launch-apps-layer.sh
 check "launch: NLB_IP fijado manualmente" has "$W/o.txt" "admin.demo-x.example.test:10.9.9.9"
@@ -507,7 +507,7 @@ echo "== 12b) universe-images.lst (gh api, rama derivada de UNIVERSE_VERSION)"
 LN="15.1.0-universe-images.lst"
 D="$(newdir g-1)"; : > "$MOCK_LOG"; EXTRA=(APPS_LAYER_DIR="$D")
 check "fetch descarga tambien el lst" run_s "$W/o.txt" fetch-universe.sh
-check "fetch: gh api con Accept raw, repo Stratio/kubernetes-universe y ref=branch-15.1" bash -c "grep -q \"^gh api -H Accept: application/vnd.github.raw repos/Stratio/kubernetes-universe/contents/universe-images.lst?ref=branch-15.1\\$\" '$MOCK_LOG'"
+check "fetch: gh api con Accept raw, repo Stratio/kubernetes-universe y ref=15.1.0 (tag de UNIVERSE_VERSION)" bash -c "grep -q \"^gh api -H Accept: application/vnd.github.raw repos/Stratio/kubernetes-universe/contents/universe-images.lst?ref=15.1.0\\$\" '$MOCK_LOG'"
 check "fetch: comprueba gh auth status antes" bash -c "grep -q '^gh auth status' '$MOCK_LOG'"
 check "fetch: deja $LN con connectors-loader, sin temporales" bash -c "grep -q connectors-loader '$D/$LN' && [ -z \"\$(ls -A '$D' | grep '^\\.universe')\" ]"
 check "fetch: imprime la linea de connectors-loader y sha256 del lst" bash -c "grep -q 'connectors-loader:2.2.3' '$W/o.txt' && grep -q \"sha256 \$(sha256sum '$D/$LN' | cut -d' ' -f1)\" '$W/o.txt'"
@@ -521,11 +521,15 @@ done
 D="$(newdir g-noauth)"; EXTRA=(APPS_LAYER_DIR="$D" MOCK_GH_NOAUTH=1); : > "$MOCK_LOG"; run_s "$W/o.txt" fetch-universe.sh
 check "gh sin autenticar: mensaje claro (gh auth login / Stratio/kubernetes-universe) y no llama a gh api" bash -c "grep -q 'gh auth login' '$W/o.txt' && grep -q 'Stratio/kubernetes-universe' '$W/o.txt' && ! grep -q '^gh api' '$MOCK_LOG'"
 D="$(newdir g-ver)"; EXTRA=(APPS_LAYER_DIR="$D" UNIVERSE_VERSION=15.2.0); : > "$MOCK_LOG"; run_s "$W/o.txt" fetch-universe.sh
-check "UNIVERSE_VERSION 15.2.0: rama derivada branch-15.2 y fichero 15.2.0-universe-images.lst" bash -c "grep -q 'ref=branch-15.2\$' '$MOCK_LOG' && [ -f '$D/15.2.0-universe-images.lst' ]"
+check "UNIVERSE_VERSION 15.2.0: ref derivada = tag 15.2.0 y fichero 15.2.0-universe-images.lst" bash -c "grep -q 'ref=15.2.0\$' '$MOCK_LOG' && [ -f '$D/15.2.0-universe-images.lst' ]"
 D="$(newdir g-br)"; EXTRA=(APPS_LAYER_DIR="$D" UNIVERSE_BRANCH=branch-15.1-devel); : > "$MOCK_LOG"; run_s "$W/o.txt" fetch-universe.sh
 check "UNIVERSE_BRANCH configurable" bash -c "grep -q 'ref=branch-15.1-devel\$' '$MOCK_LOG'"
 D="$(newdir g-nobr)"; EXTRA=(APPS_LAYER_DIR="$D" UNIVERSE_VERSION=latest); if run_s "$W/o.txt" fetch-universe.sh; then bad "version sin rama derivable"; else ok "version sin major.minor y sin UNIVERSE_BRANCH aborta"; fi
 check "version no derivable: pide UNIVERSE_BRANCH" has "$W/o.txt" "UNIVERSE_BRANCH"
+D="$(newdir g-tag)"; EXTRA=(APPS_LAYER_DIR="$D" UNIVERSE_VERSION=15.1.0); : > "$MOCK_LOG"; run_s "$W/o.txt" fetch-universe.sh
+check "UNIVERSE_BRANCH por defecto = tag UNIVERSE_VERSION (no la rama que avanza)" bash -c "grep -q 'ref=15.1.0\$' '$MOCK_LOG' && ! grep -q 'ref=branch-15.1' '$MOCK_LOG'"
+D="$(newdir g-xy)"; EXTRA=(APPS_LAYER_DIR="$D" UNIVERSE_VERSION=15.1); : > "$MOCK_LOG"; run_s "$W/o.txt" fetch-universe.sh; true
+check "UNIVERSE_VERSION=X.Y (sin patch): cae a branch-X.Y" bash -c "grep -q 'ref=branch-15.1\$' '$MOCK_LOG'"
 # launch
 D="$(newdir g-2)"; mkdir -p "$D/aws"; EXTRA=(APPS_LAYER_DIR="$D" LLM_TOKEN="$FAKE"); run_s "$W/o.txt" render-apps-layer.sh
 : > "$MOCK_LOG"; EXTRA=(APPS_LAYER_DIR="$D" NLB_IP=10.9.9.9)

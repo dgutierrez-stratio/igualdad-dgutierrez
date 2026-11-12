@@ -7,7 +7,7 @@
 #           (override: UNIVERSE_ZIP_URL). Requiere VPN/acceso a qa.int.stratio.com.
 #   Destino: ${APPS_LAYER_DIR}/kubernetes-universe-descriptors-${UNIVERSE_VERSION}.zip
 #   lst:    `gh api -H 'Accept: application/vnd.github.raw' repos/Stratio/kubernetes-universe/contents/universe-images.lst?ref=${UNIVERSE_BRANCH}`
-#           (UNIVERSE_BRANCH por defecto branch-<major>.<minor> de UNIVERSE_VERSION, p. ej. branch-15.1). Exige `gh` autenticado con
+#           (UNIVERSE_BRANCH por defecto el TAG UNIVERSE_VERSION, p. ej. 15.1.0; si no es X.Y.Z, branch-<major>.<minor>). Exige `gh` autenticado con
 #           acceso a Stratio/kubernetes-universe (si no, para con un mensaje claro). Destino: ${APPS_LAYER_DIR}/${UNIVERSE_VERSION}-universe-images.lst
 #           Motivo: connectors-management y intelligence leen de ahi las versiones de connectors-loader y analytic-environment.
 # Descarga con curl -fSL a un temporal del mismo directorio, valida (tamano > 0 y `unzip -t`) y lo mueve de forma atomica.

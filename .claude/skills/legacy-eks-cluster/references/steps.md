@@ -189,7 +189,7 @@ Solo cuando `keos install` ha terminado (validar en solo lectura: tenant `keos` 
 
 ## 14. apps-layer-automation (DESPUÉS de `keos install`; variante S3)
 
-Instala los tenants `keos` (gobierno) y `dev` (virtualizer, rocket, discovery, intelligence, genai...) con la imagen `qa.int.stratio.com/stratio/apps-layer-automation:15.1-0.1.0-SNAPSHOT`
+Instala los tenants `keos` (gobierno) y `dev` (virtualizer, rocket, discovery, intelligence, genai...) con la imagen `qa.int.stratio.com/stratio/apps-layer-automation:15.1-0.1.0-M2`
 sobre Command Center (CCT), **con S3 en vez de HDFS**. La skill NO reimplementa nada: `scripts/apps-layer.sh` parametriza el kit `2-apps-layer-kit` (en el workspace igualdad:
 `/stratio/e/igualdad/2-apps-layer-kit`; otro sitio: `APPS_LAYER_KIT=<ruta>` o `--kit`) desde `<dir>/cluster.env`. El workspace de keos (`<dir>`, donde está `keos.yaml`) se monta como `/workspace`.
 
@@ -199,7 +199,7 @@ AL="bash $SK/scripts/apps-layer.sh --dir $DIR"      # sin subcomando: ayuda. `$A
 ```
 Variables (de `cluster.env` o `kit.env` del kit; solo las dos entradas de la skill son obligatorias): `CLUSTER_NAME`, `AWS_ACCOUNT_ID`, `AWS_REGION`, `EXTERNAL_DOMAIN` (`<cluster>.desa.int`),
 `TENANT_NAME=dev`, `ENABLE_GENAI=true` (exige `LLM_TOKEN`), `KEOS_PROFILE=full|minimal`, `ENVIRONMENT_SIZE=S` (**`S`, `PIT` o `CUSTOM`**; otro valor aborta; ver abajo), `CUSTOM_SIZES_FILE` (solo con `CUSTOM`), `UNIVERSE_VERSION=15.1.0`,
-`UNIVERSE_BRANCH` (def. `branch-15.1`, rama del `.lst`), imagen `...apps-layer-automation:15.1-0.1.0-SNAPSHOT`. Directorio de ejecución **efímero**
+`UNIVERSE_BRANCH` (def. el tag `UNIVERSE_VERSION`, `15.1.0`; ref del `.lst`), imagen `...apps-layer-automation:15.1-0.1.0-M2` (inmutable; haz `docker pull` antes). Directorio de ejecución **efímero**
 `${TMPDIR:-/tmp}/apps-layer-<cluster>` (700, con secretos; regenerable con `render`), montado en `/apps-layer`.
 
 **14a. Prerrequisitos (solo lectura)**: `$AL prereqs`. OK si: `keos install` terminado (tenant `keos` **Active**, `cct-orchestrator` **Running** en `keos-cct`, hostname del NLB en
@@ -230,7 +230,7 @@ usuario IAM `s3:*` solo sobre él, access key y secreto; el texto de confirmaci�
 
 **14d. Universo fresco (OBLIGATORIO antes de cada lanzamiento)**: `$AL fetch` (lo hace también `launch` solo; nunca reutiliza una copia previa) descarga a `<APPS_LAYER_DIR>`:
 `kubernetes-universe-descriptors-<UNIVERSE_VERSION>.zip` (curl `-fSL` de `http://qa.int.stratio.com/repository/paas/kubernetes-universe/descriptors/...`, `unzip -t`, mv atómico, imprime tamaño y sha256) y
-`<UNIVERSE_VERSION>-universe-images.lst` (`gh api` raw de `Stratio/kubernetes-universe` `ref=branch-15.1`; no vacío y con `connectors-loader`). Se montan sobre los embebidos en la imagen
+`<UNIVERSE_VERSION>-universe-images.lst` (`gh api` raw de `Stratio/kubernetes-universe` `ref=15.1.0` (tag de `UNIVERSE_VERSION`); no vacío y con `connectors-loader`). Se montan sobre los embebidos en la imagen
 (el `.lst` de la imagen está desfasado: connectors-loader 2.2.0 frente a 2.2.3). El `.lst` fresco sigue siendo obligatorio, pero el kit fija por defecto `CONNECTORS_LOADER_VERSION=2.2.0` (como la PR keos-fleet#220) y el hook ignora el `.lst` para el loader; para usar el del `.lst` (2.2.3) deja `CONNECTORS_LOADER_VERSION=` vacía en `kit.env`. Si cambia `UNIVERSE_VERSION` cambian nombres, URL y rama; **no** se usa un zip/lst de otra versión.
 
 **14e. Render + check**: `$AL render` (dry-run) y `$AL render --apply` (YAML raíz `<cluster>.yaml` y de tenant `<cluster>-<tenant>.yaml`, `.env`, `kube-config` y `aws/` solo con el perfil `cloud-provisioner`);

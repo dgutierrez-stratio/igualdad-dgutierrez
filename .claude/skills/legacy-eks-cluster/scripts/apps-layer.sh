@@ -49,7 +49,12 @@ DIR="$(resolve_dir "$DIR")"
 load_env "$DIR" CLUSTER_NAME AWS_ACCOUNT_ID AWS_REGION CP_PROFILE EXTERNAL_DOMAIN
 C="$CLUSTER_NAME"
 UNIVERSE_VERSION="${UNIVERSE_VERSION:-15.1.0}"
-if [[ -z "${UNIVERSE_BRANCH:-}" && "$UNIVERSE_VERSION" =~ ^([0-9]+)\.([0-9]+) ]]; then UNIVERSE_BRANCH="branch-${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"; fi
+# Por defecto el TAG de la version (p. ej. 15.1.0), no la rama branch-<major>.<minor>: la rama avanza (hoy ya es 15.1.1: connectors-loader 2.2.5, rocket 4.1.2...)
+# y mezclaria imagenes posteriores con los descriptores 15.1.0. Si UNIVERSE_VERSION no es X.Y.Z se cae a branch-<major>.<minor>.
+if [[ -z "${UNIVERSE_BRANCH:-}" ]]; then
+  if [[ "$UNIVERSE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then UNIVERSE_BRANCH="$UNIVERSE_VERSION"
+  elif [[ "$UNIVERSE_VERSION" =~ ^([0-9]+)\.([0-9]+) ]]; then UNIVERSE_BRANCH="branch-${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"; fi
+fi
 UNIVERSE_BRANCH="${UNIVERSE_BRANCH:-}"
 AL_DEFAULT="$(apps_layer_default_dir "$C")"
 KIT=""
@@ -95,7 +100,7 @@ do_env() {
   echo "kit=${KIT:-<no encontrado>}"
   echo "tenant=${TENANT_NAME:-dev} genai=${ENABLE_GENAI:-true} perfil-keos=${KEOS_PROFILE:-full} size=${ENVIRONMENT_SIZE:-S} universo=$UNIVERSE_VERSION rama-lst=${UNIVERSE_BRANCH:-<definir UNIVERSE_BRANCH>}"
   if [[ "${ENVIRONMENT_SIZE:-S}" == CUSTOM ]]; then echo "ENVIRONMENT_SIZE=CUSTOM: overlay de recursos=${CUSTOM_SIZES_FILE:-<templates/sizes-custom.env del kit>} (el render aborta si a una app le falta una variable)"; fi
-  echo "imagen=${APPS_LAYER_IMAGE:-qa.int.stratio.com/stratio/apps-layer-automation:15.1-0.1.0-SNAPSHOT}"
+  echo "imagen=${APPS_LAYER_IMAGE:-qa.int.stratio.com/stratio/apps-layer-automation:15.1-0.1.0-M2}"
   echo "bucket de backups (opcional, GitOps)=enabled:${ENABLE_BACKUPS_BUCKET:-false} bucket=${BACKUPS_BUCKET_NAME:-${C}-backups-${AWS_ACCOUNT_ID}} usuario=${BACKUPS_USER_NAME:-${C}-backups}   (kit.env puede cambiarlos)"
   echo "kubeconfig propio=$KUBECFG$([[ -f "$KUBECFG" ]] || echo ' (aún no existe: lo genera prereqs)')"
 }
@@ -116,7 +121,7 @@ do_prereqs() {
   docker info >/dev/null 2>&1 && ok "docker daemon en marcha" || ko "el daemon de docker no responde"
   if getent hosts qa.int.stratio.com >/dev/null 2>&1; then ok "qa.int.stratio.com resuelve (VPN/red interna: imagen y zip del universo)"
   else av "qa.int.stratio.com no resuelve: sin VPN no se podrá descargar el zip ni la imagen de apps-layer"; fi
-  local img="${APPS_LAYER_IMAGE:-qa.int.stratio.com/stratio/apps-layer-automation:15.1-0.1.0-SNAPSHOT}"
+  local img="${APPS_LAYER_IMAGE:-qa.int.stratio.com/stratio/apps-layer-automation:15.1-0.1.0-M2}"
   docker image inspect "$img" >/dev/null 2>&1 && ok "imagen $img ya descargada" || av "imagen $img no descargada (docker pull al lanzar)"
   # contenedores keos-installer en marcha (un keos install sin terminar escribe en el mismo workspace)
   local run; run="$(docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null | awk '$2 ~ /keos-installer/ && $1 !~ /^keos-installer_/ {print $1}' | tr '\n' ' ')"

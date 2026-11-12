@@ -135,11 +135,11 @@ al() { TMPDIR="$T" "$AL" --dir "$D" --kit "$KS" "$@"; }
 : > "$MOCK_LOG"
 check "apps-layer.sh -h" "$AL" -h
 out="$(al env 2>&1)"; rc=$?
-[[ $rc -eq 0 ]] && grep -q "kit=$KS" <<<"$out" && grep -q "workspace keos (/workspace)=$D" <<<"$out" && grep -q "directorio efímero (/apps-layer)=$EXPECT_AL" <<<"$out" && grep -q 'rama-lst=branch-15.1' <<<"$out" && pass "apps-layer.sh env: kit, workspace=<dir>, dir efímero en TMPDIR y rama branch-15.1" || fail "apps-layer.sh env"
+[[ $rc -eq 0 ]] && grep -q "kit=$KS" <<<"$out" && grep -q "workspace keos (/workspace)=$D" <<<"$out" && grep -q "directorio efímero (/apps-layer)=$EXPECT_AL" <<<"$out" && grep -q 'rama-lst=15.1.0' <<<"$out" && pass "apps-layer.sh env: kit, workspace=<dir>, dir efímero en TMPDIR y ref del .lst = tag 15.1.0" || fail "apps-layer.sh env"
 [[ "$(APPS_LAYER_KIT="$KS" bash -c "source '$S/lib.sh'; find_apps_layer_kit '' '$D'")" == "$KS" ]] && pass "find_apps_layer_kit respeta APPS_LAYER_KIT" || fail "find_apps_layer_kit APPS_LAYER_KIT"
 bash -c "source '$S/lib.sh'; SKILL_DIR=/no/existe; APPS_LAYER_KIT=; find_apps_layer_kit /no/existe '$T/vacio'" >/dev/null 2>&1 && fail "find_apps_layer_kit encontró un kit inexistente" || pass "find_apps_layer_kit devuelve 1 si no hay kit"
 out="$(al s3 plan 2>&1)"; rc=$?
-[[ $rc -eq 0 ]] && grep -q "STUB s3-requisites args=\[plan\] CLUSTER_ENV_FILE=$D/cluster.env KEOS_WORKSPACE_DIR=$D APPS_LAYER_DIR=$EXPECT_AL KIT_AWS_PROFILE=cloud-provisioner UNIVERSE_BRANCH=branch-15.1" <<<"$out" && pass "s3 plan delega con CLUSTER_ENV_FILE=<dir>/cluster.env, workspace=<dir>, dir efímero y perfil cloud-provisioner" || { fail "s3 plan delegado"; echo "$out" | sed 's/^/      /'; }
+[[ $rc -eq 0 ]] && grep -q "STUB s3-requisites args=\[plan\] CLUSTER_ENV_FILE=$D/cluster.env KEOS_WORKSPACE_DIR=$D APPS_LAYER_DIR=$EXPECT_AL KIT_AWS_PROFILE=cloud-provisioner UNIVERSE_BRANCH=15.1.0" <<<"$out" && pass "s3 plan delega con CLUSTER_ENV_FILE=<dir>/cluster.env, workspace=<dir>, dir efímero y perfil cloud-provisioner" || { fail "s3 plan delegado"; echo "$out" | sed 's/^/      /'; }
 out="$(APPS_LAYER_DIR=/stratio/e/igualdad/apps-layer al s3 status 2>&1)"
 grep -q 'se IGNORA' <<<"$out" && grep -q "APPS_LAYER_DIR=$EXPECT_AL " <<<"$out" && ! grep '^STUB' <<<"$out" | grep -q 'APPS_LAYER_DIR=/stratio/e/igualdad/apps-layer ' && pass "APPS_LAYER_DIR exportada (ruta vieja) se ignora avisando: el kit recibe la ruta efímera esperada" || fail "APPS_LAYER_DIR del entorno no se ignoró"
 out="$(APPS_LAYER_DIR=/stratio/e/igualdad/apps-layer al --apps-layer-dir /tmp/otra-ruta s3 status 2>&1)"
@@ -174,7 +174,7 @@ out="$(TMPDIR="$T" "$AL" --dir "$DC" --kit "$KS" env 2>&1)"; rc=$?
 echo "== 7b. apps-layer.sh prereqs / plan (solo lectura, mocks) =="
 : > "$MOCK_LOG"; out="$(al prereqs 2>&1)"; rc=$?
 [[ $rc -eq 0 ]] && grep -q 'RESULTADO: OK' <<<"$out" && pass "prereqs OK: tenant keos Active, cct-orchestrator Running, NLB, gh autenticado" || { fail "prereqs rc=$rc"; echo "$out" | sed 's/^/      /'; }
-grep -q 'gh lee Stratio/kubernetes-universe universe-images.lst@branch-15.1' <<<"$out" && pass "prereqs comprueba el acceso de gh a Stratio/kubernetes-universe@branch-15.1" || fail "prereqs no comprueba gh api"
+grep -q 'gh lee Stratio/kubernetes-universe universe-images.lst@15.1.0' <<<"$out" && pass "prereqs comprueba el acceso de gh a Stratio/kubernetes-universe@15.1.0 (tag de UNIVERSE_VERSION)" || fail "prereqs no comprueba gh api"
 w="$(writes_in_log "$MOCK_LOG")"; [[ -z "$w" ]] && pass "prereqs: ninguna escritura en AWS/kubectl/docker" || fail "prereqs escribió: $w"
 out="$(MOCK_GH_NOAUTH=1 al prereqs 2>&1)"; rc=$?
 [[ $rc -ne 0 ]] && grep -q 'gh auth login' <<<"$out" && grep -q 'PARAR' <<<"$out" && pass "prereqs: gh sin autenticar => KO con mensaje claro (parar)" || fail "prereqs con gh sin auth rc=$rc"
