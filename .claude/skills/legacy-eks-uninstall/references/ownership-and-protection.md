@@ -21,6 +21,15 @@ El finder lista **todo** lo que hay en la cuenta/región y el remover borra **to
 - **`OrganizationAccountAccessRole`**: el acceso a la cuenta. Solo se comprueba su confianza y sus políticas (foto previa vs. verify); no hay roles SSO en estas cuentas.
 - **Caller**: nunca se borra la identidad con la que se ejecuta; `ADMIN_PROFILE` no puede ser el usuario `cloud-provisioner`.
 
+## Recursos de la migración a GitOps (Loki)
+
+Si el clúster se preparó para migrar a GitOps (`flux keos`, PR Stratio/keos-fleet#220 §4.4), existen el bucket `<cluster>-loki` y el rol IRSA `loki-<cluster>` (política inline `loki-s3`), creados a mano o con
+`2-apps-layer-kit/scripts/gitops-prereqs.sh`. **Loki no es legacy**, pero estos dos recursos son del clúster: ambos nombres contienen el del clúster, así que el filtro los clasifica `owned` (tipos `iam_roles` y
+`s3_buckets`) y el remover los borra (`_delete_iam_role` retira antes las políticas inline y adjuntas; `_delete_s3_bucket` vacía el bucket). No hay clase aparte ni nada que añadir. Un rol `loki-*` o un bucket `*-loki`
+cuyo nombre **no** lleve el del clúster es `unowned` (se excluye y se informa). Como los crea a mano o el script **sin pila** (a diferencia del bucket interno), no hay stack que los arrastre: son recursos sueltos.
+Para conservarlos al desinstalar: `UNINSTALL_PROTECTED_IDS="<cluster>-loki"` y `UNINSTALL_PROTECTED_NAMES="loki-<cluster>"` en `cluster.env` y volver a `plan`. Lo mismo vale (no se crean con esta instalación) para la clave KMS
+`alias/flux-<cluster>`, el rol `flux-kustomize-controller-<cluster>` y `<cluster>-efs-csi` si alguien los creó al migrar: el rol y la política `<cluster>-efs-csi` contienen el nombre y se borran; la clave KMS no (propia del cliente: `unowned`).
+
 ## Cuenta dedicada
 
 `context` consulta todas las regiones habilitadas: si hay otro EKS, o una VPC no por defecto que no es la del clúster, `dedicated_account=false` y los tipos de id opaco que no estén dentro de la VPC del clúster se tratan como `unowned`. Sirve para no barrer lo de otro entorno que comparta cuenta.

@@ -35,7 +35,9 @@ case "$svc $op" in
     echo "{\"Stacks\":[{\"StackStatus\":\"${MOCK_STACK_STATUS:-CREATE_COMPLETE}\",\"Outputs\":[{\"OutputKey\":\"InternalS3BucketName\",\"OutputValue\":\"demo-x-internal-111111111111\"},{\"OutputKey\":\"S3StratioAppsSecretArn\",\"OutputValue\":\"arn:aws:secretsmanager:eu-west-1:$acct:secret:demo-x-s3-AbCdEf\"}$bout]}]}" ;;
   "cloudformation validate-template") echo '{}' ;;
   "s3api head-bucket")
-    if [[ "$bkt" == *backups* ]]; then [[ "${MOCK_BACKUPS_BUCKET:-0}" == 1 ]] || nf 404 HeadBucket
+    if [[ "$bkt" == *loki* ]]; then
+      case "${MOCK_LOKI_BUCKET:-0}" in 1) ;; ajeno) echo "An error occurred (403) when calling the HeadBucket operation: Forbidden" >&2; exit 254 ;; *) nf 404 HeadBucket ;; esac
+    elif [[ "$bkt" == *backups* ]]; then [[ "${MOCK_BACKUPS_BUCKET:-0}" == 1 ]] || nf 404 HeadBucket
     else [[ "${MOCK_BUCKET:-0}" == 1 ]] || nf 404 HeadBucket; fi ;;
   "s3api get-bucket-tagging")
     if [[ "$bkt" == *backups* ]]; then echo "{\"TagSet\":[{\"Key\":\"cluster\",\"Value\":\"${MOCK_BACKUPS_CLUSTER:-demo-x}\"}]}"
@@ -59,6 +61,16 @@ case "$svc $op" in
     if [[ "$mv_on" == 1 && ! -f "$st" ]]; then
       touch "$st"; echo '{"Versions":[{"Key":"a.csv","VersionId":"v1"},{"Key":"b.csv","VersionId":"v2"}],"DeleteMarkers":[{"Key":"a.csv","VersionId":"dm1"}]}'
     else echo '{}'; fi ;;
+  "eks describe-cluster") echo "https://oidc.eks.eu-west-1.amazonaws.com/id/MOCKOIDC0000" ;;
+  "iam get-open-id-connect-provider") [[ "${MOCK_OIDC:-1}" == 1 ]] || nf NoSuchEntity GetOpenIDConnectProvider; echo '{"Url":"oidc.eks.eu-west-1.amazonaws.com/id/MOCKOIDC0000"}' ;;
+  "iam get-role")
+    # solo el rol de Loki (loki-*): MOCK_LOKI_ROLE=0|1|bad (bad = confianza de otro SA)
+    [[ "${MOCK_LOKI_ROLE:-0}" != 0 ]] || nf NoSuchEntity GetRole
+    sub="system:serviceaccount:keos-observability:loki"; [[ "${MOCK_LOKI_ROLE:-0}" != bad ]] || sub="system:serviceaccount:otro:otro"
+    echo "{\"Role\":{\"RoleName\":\"loki-demo-x\",\"AssumeRolePolicyDocument\":{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"arn:aws:iam::$acct:oidc-provider/oidc.eks.eu-west-1.amazonaws.com/id/MOCKOIDC0000\"},\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"oidc.eks.eu-west-1.amazonaws.com/id/MOCKOIDC0000:sub\":\"$sub\",\"oidc.eks.eu-west-1.amazonaws.com/id/MOCKOIDC0000:aud\":\"sts.amazonaws.com\"}}}]}}}" ;;
+  "iam get-role-policy")
+    [[ "${MOCK_LOKI_POLICY:-0}" == 1 ]] || nf NoSuchEntity GetRolePolicy
+    echo '{"PolicyName":"loki-s3","PolicyDocument":{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:DeleteObject"],"Resource":["arn:aws:s3:::demo-x-loki/*"]},{"Effect":"Allow","Action":["s3:ListBucket"],"Resource":["arn:aws:s3:::demo-x-loki"]}]}}' ;;
   "configure get")
     # claves estaticas ficticias del perfil (MOCK_NOKEYS=1: el perfil no las tiene, como un rol asumido)
     [[ "${MOCK_NOKEYS:-0}" != 1 ]] || exit 1

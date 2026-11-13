@@ -20,6 +20,8 @@
 #   backups-env [--dry-run]  OPCIONAL (paso 14h): backups-env.sh del kit. Escribe SOLO <APPS_LAYER_DIR>/backups.env (600, sin comillas, sin secretos: cuenta, región,
 #                          VELERO_BUCKET y VELERO_ROLE de cluster.env) e imprime los avisos de `enviroment-ready --backups/--reporter`. No ejecuta enviroment-ready,
 #                          ni docker, ni kubectl, ni aws: eso lo lanza la persona usuaria dentro del contenedor de apps-layer
+#   gitops plan|status|info  OPCIONAL (paso 14b-ter), SOLO LECTURA: prerrequisitos AWS de la migración a GitOps (hoy solo Loki: bucket <cluster>-loki + rol IRSA loki-<cluster>;
+#                          Loki NO es legacy). Requiere ENABLE_LOKI_BUCKET=true; `info` sin secretos. `gitops apply --apply` CREA lo que falte (adopta lo existente, nunca borra; exige terminal)
 # El borrado (contenedores, directorio efímero, bucket S3 Retain, bucket de backups con --delete-backups) NO está aquí: teardown.sh fase A (references/teardown.md).
 #
 # Directorio efímero (700, con secretos): ${TMPDIR:-/tmp}/apps-layer-<cluster>. Una APPS_LAYER_DIR exportada en el shell se IGNORA
@@ -35,16 +37,16 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 DIR=""; KIT_ARG=""; AL_DIR_ARG=""; SUB=""; SUBARGS=()
 # Variables del bucket de backups que la persona usuaria exportó en SU shell: se reenvían al kit tal cual (cluster.env, que se carga abajo, no las pisa)
 FWD_VARS=(); FWD_VALS=()
-for v in ENABLE_BACKUPS_BUCKET BACKUPS_BUCKET_NAME BACKUPS_USER_NAME; do if [[ -n "${!v+x}" ]]; then FWD_VARS+=("$v"); FWD_VALS+=("${!v}"); fi; done
+for v in ENABLE_BACKUPS_BUCKET BACKUPS_BUCKET_NAME BACKUPS_USER_NAME ENABLE_LOKI_BUCKET LOKI_BUCKET_NAME LOKI_ROLE_NAME; do if [[ -n "${!v+x}" ]]; then FWD_VARS+=("$v"); FWD_VALS+=("${!v}"); fi; done
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dir) DIR="$2"; shift 2 ;; --kit) KIT_ARG="$2"; shift 2 ;; --apps-layer-dir) AL_DIR_ARG="$2"; shift 2 ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
     -*) die "opción desconocida antes del subcomando: $1" ;;
     *) SUB="$1"; shift; SUBARGS=("$@"); break ;;
   esac
 done
-[[ -n "$SUB" ]] || { sed -n '2,30p' "$0"; exit 1; }
+[[ -n "$SUB" ]] || { sed -n '2,32p' "$0"; exit 1; }
 DIR="$(resolve_dir "$DIR")"
 load_env "$DIR" CLUSTER_NAME AWS_ACCOUNT_ID AWS_REGION CP_PROFILE EXTERNAL_DOMAIN
 C="$CLUSTER_NAME"
@@ -167,6 +169,15 @@ case "$SUB" in
     esac ;;
   token) run_kit import-llm-token.sh "${SUBARGS[@]}" ;;
   backups-env) run_kit backups-env.sh "${SUBARGS[@]}" ;;
+  gitops)
+    sub="${SUBARGS[0]:-plan}"; rest=("${SUBARGS[@]:1}")
+    case "$sub" in
+      plan|status|info) run_kit gitops-prereqs.sh "$sub" ;;
+      apply)
+        if [[ "${rest[*]:-}" == "--apply" ]]; then run_kit gitops-prereqs.sh apply
+        else echo "DRY-RUN: 'apply' CREA (solo crea, adopta lo existente, nunca borra) el bucket <cluster>-loki y el rol IRSA loki-<cluster> con la política inline loki-s3 en la cuenta $AWS_ACCOUNT_ID (requiere ENABLE_LOKI_BUCKET=true). Mostrando el plan; para crear: gitops apply --apply (desde una terminal)."; run_kit gitops-prereqs.sh plan; fi ;;
+      *) die "gitops: subcomando desconocido: $sub (plan|status|info|apply --apply)" ;;
+    esac ;;
   render)
     apply=0; others=(); for a in "${SUBARGS[@]}"; do if [[ "$a" == --apply ]]; then apply=1; else others+=("$a"); fi; done
     if [[ $apply -eq 1 ]]; then run_kit render-apps-layer.sh "${others[@]}"
@@ -176,5 +187,5 @@ case "$SUB" in
   launch)
     for a in "${SUBARGS[@]}"; do case "$a" in --run|--force) die "la skill nunca ejecuta docker run (ni borra contenedores): copia el comando impreso y lánzalo en TU terminal" ;; esac; done
     run_kit launch-apps-layer.sh "${SUBARGS[@]}" ;;
-  *) die "subcomando desconocido: $SUB (env|prereqs|plan|s3|token|render|fetch|check|launch|backups-env)" ;;
+  *) die "subcomando desconocido: $SUB (env|prereqs|plan|s3|token|render|fetch|check|launch|backups-env|gitops)" ;;
 esac

@@ -979,6 +979,63 @@ check "INFORME: SHA de la PR actualizado a 2d36d7d (HEAD) y sin f36fe83 como HEA
 check "kit.env.example documenta CUSTOM y CUSTOM_SIZES_FILE" bash -c "grep -q 'CUSTOM_SIZES_FILE' '$KIT/kit.env.example' && grep -q 'CUSTOM' '$KIT/kit.env.example'"
 check "README/INFORME/kit.env.example/overlay sin el token ficticio" bash -c "! grep -rlF '$FAKE' '$KIT/README.md' '$KIT/docs/INFORME.md' '$KIT/kit.env.example' '$OVL'"
 
+echo "== 18) gitops-prereqs.sh (OPCIONAL, Loki): solo crea, adopta lo existente, nunca modifica ni borra"
+WRITE_LOKI_RE='s3api (create-|put-|delete-)|iam (create|put|delete|attach|detach|update|tag)|cloudformation'
+D="$(newdir g-0)"; : > "$MOCK_LOG"; EXTRA=(APPS_LAYER_DIR="$D")
+check "por defecto (sin exportar ENABLE_LOKI_BUCKET) el paso esta activo: plan termina bien" run_s "$W/o.txt" gitops-prereqs.sh plan
+check "defecto: plan sin escrituras" bash -c "! grep -E '$WRITE_LOKI_RE' '$MOCK_LOG'"
+: > "$MOCK_LOG"; EXTRA=(APPS_LAYER_DIR="$D" ENABLE_LOKI_BUCKET=false)
+if run_s "$W/o.txt" gitops-prereqs.sh plan; then bad "ENABLE_LOKI_BUCKET=false debe omitir"; else ok "ENABLE_LOKI_BUCKET=false omite el paso"; fi
+check "false: mensaje claro y ninguna llamada a aws" bash -c "grep -q 'ENABLE_LOKI_BUCKET' '$W/o.txt' && [ ! -s '$MOCK_LOG' ]"
+: > "$MOCK_LOG"; EXTRA=(APPS_LAYER_DIR="$D" ENABLE_LOKI_BUCKET=true)
+check "plan (defecto) termina bien" run_s "$W/o.txt" gitops-prereqs.sh
+check "plan: bucket demo-x-loki y rol loki-demo-x con SA keos-observability:loki" bash -c "grep -q 'demo-x-loki' '$W/o.txt' && grep -q 'loki-demo-x' '$W/o.txt' && grep -q 'system:serviceaccount:keos-observability:loki' '$W/o.txt'"
+check "plan: ninguna operacion de escritura" bash -c "! grep -E '$WRITE_LOKI_RE' '$MOCK_LOG'"
+: > "$MOCK_LOG"; EXTRA=(APPS_LAYER_DIR="$D" ENABLE_LOKI_BUCKET=true)
+if run_s "$W/o.txt" gitops-prereqs.sh apply; then bad "apply sin tty"; else ok "apply sin tty aborta"; fi
+check "apply sin tty: sin escrituras" bash -c "! grep -E '$WRITE_LOKI_RE' '$MOCK_LOG'"
+: > "$MOCK_LOG"; printf 'otro\n' > "$W/in.txt"; STDIN_FILE="$W/in.txt"; EXTRA=(APPS_LAYER_DIR="$D" ENABLE_LOKI_BUCKET=true KIT_TEST_ALLOW_NOTTY=1)
+if run_s "$W/o.txt" gitops-prereqs.sh apply; then bad "apply con confirmacion erronea"; else ok "apply con confirmacion erronea aborta"; fi
+check "confirmacion erronea: sin escrituras" bash -c "! grep -E '$WRITE_LOKI_RE' '$MOCK_LOG'"
+# todo falta: crea bucket, rol y politica (el mock no refleja el estado tras crear, por eso el apply acaba en error de verificacion; lo que importa son las llamadas)
+: > "$MOCK_LOG"; printf 'demo-x\n' > "$W/in.txt"; EXTRA=(APPS_LAYER_DIR="$D" ENABLE_LOKI_BUCKET=true KIT_TEST_ALLOW_NOTTY=1)
+run_s "$W/o.txt" gitops-prereqs.sh apply
+check "apply confirmado: crea bucket (LocationConstraint), bloqueo publico, cifrado y etiqueta" bash -c "grep -q 's3api create-bucket .*demo-x-loki' '$MOCK_LOG' && grep -q 'LocationConstraint=eu-west-1' '$MOCK_LOG' && grep -q 's3api put-public-access-block' '$MOCK_LOG' && grep -q 's3api put-bucket-encryption' '$MOCK_LOG' && grep -q 's3api put-bucket-tagging' '$MOCK_LOG'"
+check "apply confirmado: crea el rol loki-demo-x y la politica inline loki-s3" bash -c "grep -q 'iam create-role --role-name loki-demo-x' '$MOCK_LOG' && grep -q 'iam put-role-policy --role-name loki-demo-x --policy-name loki-s3' '$MOCK_LOG'"
+check "apply: nunca borra ni adjunta politicas gestionadas" bash -c "! grep -E 'delete-|detach-|attach-|iam update|delete-role' '$MOCK_LOG'"
+# todo existe y coincide: idempotente, sin confirmacion y sin escrituras
+: > "$MOCK_LOG"; STDIN_FILE=""; EXTRA=(APPS_LAYER_DIR="$D" ENABLE_LOKI_BUCKET=true KIT_TEST_ALLOW_NOTTY=1 MOCK_LOKI_BUCKET=1 MOCK_LOKI_ROLE=1 MOCK_LOKI_POLICY=1)
+check "apply con todo existente: termina bien (idempotente, no pide confirmacion)" run_s "$W/o.txt" gitops-prereqs.sh apply
+check "apply con todo existente: sin escrituras (adopta)" bash -c "! grep -E '$WRITE_LOKI_RE' '$MOCK_LOG'"
+check "apply con todo existente: dice que adopta y no modifica" bash -c "grep -qi 'nada que crear' '$W/o.txt'"
+check "status con todo existente: rc 0" run_s "$W/o.txt" gitops-prereqs.sh status
+run_s "$W/o.txt" gitops-prereqs.sh info
+check "info: ARN del rol, s3-eks y bucket" bash -c "grep -q 'role/loki-demo-x' '$W/o.txt' && grep -q 's3-eks' '$W/o.txt' && grep -q 'bucketName: demo-x-loki' '$W/o.txt'"
+check "info: alloy y tempo enabled: false" bash -c "grep -A1 'alloy:' '$W/o.txt' | grep -q 'enabled: false' && grep -A1 'tempo:' '$W/o.txt' | grep -q 'enabled: false'"
+check "info: sin claves ni valores secretos" bash -c "! grep -iE 'AKIA|secret_key|ACCESS_KEY' '$W/o.txt'"
+# existe pero diverge (confianza de otro SA): se avisa y NO se toca
+: > "$MOCK_LOG"; EXTRA=(APPS_LAYER_DIR="$D" ENABLE_LOKI_BUCKET=true KIT_TEST_ALLOW_NOTTY=1 MOCK_LOKI_BUCKET=1 MOCK_LOKI_ROLE=bad MOCK_LOKI_POLICY=1)
+if run_s "$W/o.txt" gitops-prereqs.sh status; then bad "status con divergencia debe fallar"; else ok "status con rol divergente: rc distinto de 0"; fi
+check "divergencia: se avisa y no se escribe nada" bash -c "grep -q 'DIVERGENCIA' '$W/o.txt' && ! grep -E '$WRITE_LOKI_RE' '$MOCK_LOG'"
+# rol existente sin politica: no se anade (seria modificar un rol existente)
+: > "$MOCK_LOG"; printf 'demo-x\n' > "$W/in.txt"; STDIN_FILE="$W/in.txt"; EXTRA=(APPS_LAYER_DIR="$D" ENABLE_LOKI_BUCKET=true KIT_TEST_ALLOW_NOTTY=1 MOCK_LOKI_BUCKET=1 MOCK_LOKI_ROLE=1 MOCK_LOKI_POLICY=0)
+if run_s "$W/o.txt" gitops-prereqs.sh apply; then bad "rol sin politica debe abortar"; else ok "rol existente sin politica inline: apply aborta sin tocarlo"; fi
+check "rol sin politica: sin escrituras" bash -c "! grep -E '$WRITE_LOKI_RE' '$MOCK_LOG'"
+# bucket existente y rol ausente: crea solo el rol
+: > "$MOCK_LOG"; printf 'demo-x\n' > "$W/in.txt"; EXTRA=(APPS_LAYER_DIR="$D" ENABLE_LOKI_BUCKET=true KIT_TEST_ALLOW_NOTTY=1 MOCK_LOKI_BUCKET=1 MOCK_LOKI_ROLE=0)
+run_s "$W/o.txt" gitops-prereqs.sh apply
+check "bucket existente: no se vuelve a crear ni se toca; solo se crea el rol" bash -c "! grep -E 's3api (create|put)' '$MOCK_LOG' && grep -q 'iam create-role' '$MOCK_LOG'"
+# bucket ajeno (403) y OIDC ausente
+: > "$MOCK_LOG"; EXTRA=(APPS_LAYER_DIR="$D" ENABLE_LOKI_BUCKET=true KIT_TEST_ALLOW_NOTTY=1 MOCK_LOKI_BUCKET=ajeno)
+if run_s "$W/o.txt" gitops-prereqs.sh apply; then bad "bucket ajeno"; else ok "bucket de otra cuenta (403): aborta"; fi
+EXTRA=(APPS_LAYER_DIR="$D" ENABLE_LOKI_BUCKET=true MOCK_OIDC=0)
+if run_s "$W/o.txt" gitops-prereqs.sh plan; then bad "sin proveedor OIDC"; else ok "sin proveedor OIDC de IAM: aborta"; fi
+EXTRA=(APPS_LAYER_DIR="$D" ENABLE_LOKI_BUCKET=true MOCK_ACCOUNT=999999999999)
+if run_s "$W/o.txt" gitops-prereqs.sh plan; then bad "cuenta distinta"; else ok "cuenta distinta aborta"; fi
+EXTRA=(APPS_LAYER_DIR="$D" ENABLE_LOKI_BUCKET=maybe); if run_s "$W/o.txt" gitops-prereqs.sh plan; then bad "flag invalido"; else ok "ENABLE_LOKI_BUCKET invalido aborta"; fi
+STDIN_FILE=""
+check "kit.env.example y README documentan ENABLE_LOKI_BUCKET y que Loki no es legacy" bash -c "grep -q 'ENABLE_LOKI_BUCKET' '$KIT/kit.env.example' && grep -q 'ENABLE_LOKI_BUCKET' '$KIT/README.md' && grep -qi 'Loki NO es legacy' '$KIT/README.md' && grep -q 'Activado por defecto' '$KIT/README.md' && grep -q 'alloy y tempo no tienen paso' '$KIT/README.md'"
+
 echo
 echo "Resultado: $PASS ok, $FAIL fallos"
 [[ $FAIL -eq 0 ]]

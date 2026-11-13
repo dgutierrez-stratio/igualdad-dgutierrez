@@ -126,11 +126,13 @@
     "AWSServiceRoleForAutoScaling",
     "control-plane.cluster-api-provider-aws.sigs.k8s.io",
     "controllers.cluster-api-provider-aws.sigs.k8s.io",
-    "eks-controlplane.cluster-api-provider-aws.sigs.k8s.io",
-    "eks-nodegroup.cluster-api-provider-aws.sigs.k8s.io",
     "demo-x-external-dns",
     "demo-x-iam-service-role",
     "demo-x-velero",
+    "eks-controlplane.cluster-api-provider-aws.sigs.k8s.io",
+    "eks-nodegroup.cluster-api-provider-aws.sigs.k8s.io",
+    "loki-demo-x",
+    "loki-otro-proyecto",
     "nodes.cluster-api-provider-aws.sigs.k8s.io",
     "rol-de-otro-proyecto"
   ],
@@ -166,6 +168,7 @@
     "demo-x-backups-111111111111",
     "demo-x-internal-111111111111",
     "demo-x-velero-111111111111",
+    "demo-x-loki",
     "bucket-de-otro-equipo"
   ],
   "secrets_manager_secrets": [

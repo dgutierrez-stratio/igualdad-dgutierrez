@@ -19,7 +19,7 @@ por app, riesgos y lo no verificado); ambos son análisis previos a la reorganiz
 2-apps-layer-kit/
   README.md  kit.env.example
   templates/   root.yaml.tpl  tenant.yaml.tpl  env.tpl  requisites-s3.cfn.yaml  (+ bucket de backups opcional)  sizes-custom.env  (overlay de recursos de ENVIRONMENT_SIZE=CUSTOM)
-  scripts/     lib.sh  render-apps-layer.sh  s3-requisites.sh  import-llm-token.sh  fetch-universe.sh  launch-apps-layer.sh  check-apps-layer.sh  backups-env.sh  (opcional)
+  scripts/     lib.sh  render-apps-layer.sh  s3-requisites.sh  import-llm-token.sh  fetch-universe.sh  launch-apps-layer.sh  check-apps-layer.sh  backups-env.sh  (opcional)  gitops-prereqs.sh  (opcional, Loki para GitOps)
   docs/        INFORME.md  plan-caso-uso-s3.md  (+ igualdad-dgutierrez.yaml y dot-env de la PR 220, solo referencia)
   tests/       run-offline-tests.sh  mock/bin/{aws,kubectl,docker,getent,curl,gh}  fixtures/ (base de la plantilla requisites)
 ```
@@ -99,6 +99,26 @@ scripts/s3-requisites.sh backups-info  # solo lectura y SIN secretos: bucket, re
   source "${APPS_LAYER_DIR}/.env"      # BACKUPS_S3_BUCKET_ACCESS_KEY / _SECRET_KEY / _NAME / _REGION
   export BACKUPS_S3_BUNDLE="$(printf 'passwords:\n  - name: backup\n    data:\n      user: %s\n      pass: %s\n' "$BACKUPS_S3_BUCKET_ACCESS_KEY" "$BACKUPS_S3_BUCKET_SECRET_KEY" | base64 -w0)"
   ```
+
+## Prerrequisitos de la migración a GitOps: Loki (activado por defecto, `gitops-prereqs.sh`)
+
+**Loki NO es legacy.** keos-installer 1.4.2 no lo despliega (el central logging legacy es fluentd + OpenSearch). Lo despliega GitOps (`flux keos`:
+`components.loki` enabled, `installationType: s3-eks`) y **espera ya creados** el bucket `<cluster>-loki` y el rol IRSA `loki-<cluster>` (confianza
+`system:serviceaccount:keos-observability:loki`, política inline `loki-s3`), tal como los crea a mano la PR Stratio/keos-fleet#220 (§4.4). Si la
+instalación legacy no los creó, hay que crearlos **antes** de migrar o Loki no arranca (S3 sin bucket, SA sin rol).
+
+- **Activado por defecto** (`ENABLE_LOKI_BUCKET=true`; con `false` en cluster.env/kit.env el paso se omite; aun activado, **no crea nada hasta `apply`**) (cluster.env o kit.env; `LOKI_BUCKET_NAME`, defecto `<cluster>-loki`; `LOKI_ROLE_NAME`, defecto
+  `loki-<cluster>` y no debe cambiarse). **No va en el stack** `<cluster>-requisites`: es un script aparte con la CLI de AWS, para poder **adoptar** recursos
+  que ya existan (un stack no puede adoptarlos).
+- `scripts/gitops-prereqs.sh plan` (solo lectura: OIDC del EKS vivo, estado de bucket/rol/política y qué haría) → `apply` (terminal, teclear el clúster) →
+  `info` (solo lectura, **sin secretos** —IRSA no usa claves—: bucket, región, ARN del rol y el bloque `components.loki` del RSIP). `status` da rc 1 si falta algo.
+- **Solo crea e idempotente, nunca borra**: lo que ya existe se adopta tal cual (ni se modifica ni se etiqueta); si difiere de lo esperado (confianza de otro
+  SA, política que no apunta al bucket) lo **avisa** y no lo toca; un rol existente sin la política `loki-s3` aborta (añadírsela sería modificarlo).
+  Lo que crea: bucket cifrado AES256 con acceso público bloqueado y etiqueta `cluster=<cluster>`; rol con confianza IRSA del OIDC de este clúster; política
+  inline `loki-s3` (`Get/Put/DeleteObject` sobre el bucket y `ListBucket`).
+- Desde la skill: `al gitops plan|apply|status|info` (`scripts/apps-layer.sh`). Borrado: lo hace `legacy-eks-uninstall` (por nombre de clúster); `s3-requisites.sh delete` y `teardown.sh` no lo tocan.
+- **alloy y tempo no tienen paso y quedan DESACTIVADOS por defecto** (`components.alloy`/`tempo` `enabled: false`, lo imprime `info`); tampoco cubre el resto de prerrequisitos de la PR (clave KMS y rol de kustomize-controller, rol IRSA del driver de EFS):
+  ver `1-aws-cluster/GUIA-INSTALACION-LEGACY.md`, "Prerrequisitos de la migración a GitOps".
 
 ## Directorio de ejecución efímero (`APPS_LAYER_DIR`)
 

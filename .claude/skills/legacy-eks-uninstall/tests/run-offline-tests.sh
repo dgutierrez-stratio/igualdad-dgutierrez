@@ -26,8 +26,13 @@ inclean vpcs vpc-0f7b98399966cea8c && pass "VPC del clúster en el plan" || fail
 inclean eks_clusters demo-x && pass "EKS del clúster en el plan" || fail "EKS ausente"
 inclean iam_users cloud-provisioner && pass "usuario cloud-provisioner (compartido) en el plan" || fail "cloud-provisioner ausente"
 for x in "s3_buckets bucket-de-otro-equipo" "iam_roles rol-de-otro-proyecto" "secrets_manager_secrets secreto-ajeno"; do set -- $x; inclean "$1" "$2" && fail "AJENO en el plan: $1 $2" || pass "ajeno excluido: $1 $2"; done
-[[ "$(jq '[.[]|length]|add' "$CL")" -eq 127 ]] && pass "127 recursos a borrar (igual que la ejecución real)" || fail "recuento a borrar: $(jq '[.[]|length]|add' "$CL")"
-[[ "$(jq '.counts.protected' "$RP")" -eq 13 && "$(jq '.counts.unowned' "$RP")" -eq 3 ]] && pass "13 protegidos y 3 ajenos informados" || fail "recuentos protegidos/ajenos"
+[[ "$(jq '[.[]|length]|add' "$CL")" -eq 129 ]] && pass "129 recursos a borrar (igual que la ejecución real)" || fail "recuento a borrar: $(jq '[.[]|length]|add' "$CL")"
+[[ "$(jq '.counts.protected' "$RP")" -eq 13 && "$(jq '.counts.unowned' "$RP")" -eq 4 ]] && pass "13 protegidos y 4 ajenos informados" || fail "recuentos protegidos/ajenos"
+# Loki de la migración a GitOps (PR keos-fleet#220 §4.4: bucket <cluster>-loki y rol loki-<cluster>, creados a mano o con gitops-prereqs.sh): llevan el nombre del clúster => se barren; uno ajeno no
+inclean iam_roles loki-demo-x && pass "rol IRSA loki-<cluster> (Loki/GitOps) en el plan" || fail "loki-demo-x ausente del plan"
+inclean s3_buckets demo-x-loki && pass "bucket <cluster>-loki (Loki/GitOps) en el plan" || fail "demo-x-loki ausente del plan"
+inclean iam_roles loki-otro-proyecto && fail "rol loki-* de otro proyecto en el plan" || pass "rol loki-* sin relación con el clúster excluido (ajeno)"
+jq -e '[.unowned[]|select(.id=="loki-otro-proyecto")]|length==1' "$RP" >/dev/null && pass "loki-otro-proyecto informado como ajeno" || fail "loki-otro-proyecto no informado"
 "$F" "$FX/finder-full.json" "$FX/context.json" "$T/c2.json" "$T/r2.json" --include-unowned >/dev/null; jq -e '.s3_buckets|index("bucket-de-otro-equipo")!=null' "$T/c2.json" >/dev/null && pass "--include-unowned incluye los ajenos" || fail "--include-unowned"
 jq -e '.vpcs|index("vpc-0f717d5c98b8ddb9b")==null' "$T/c2.json" >/dev/null && pass "--include-unowned NO incluye protegidos" || fail "--include-unowned incluye la VPC por defecto"
 jq '.keep_shared=true' "$FX/context.json" > "$T/ctx-keep.json"; "$F" "$FX/finder-full.json" "$T/ctx-keep.json" "$T/c3.json" "$T/r3.json" >/dev/null
@@ -65,7 +70,7 @@ grep -q 'identity.json tenía la VPC vpc-00000000stale0001' <<<"$out" && pass "a
 [[ "$(stat -c %a "$D/uninstall/identity.json")" == 600 ]] && pass "identity.json sigue en modo 600" || fail "identity.json con permisos incorrectos"
 "$S/uninstall.sh" apply --dir "$D" --confirm-cluster demo-x --confirm-account 111111111111 >/dev/null 2>&1 && fail "apply sin plan previo" || pass "apply exige plan previo"
 "$S/uninstall.sh" plan --dir "$D" > "$T/plan.out" 2>&1 && pass "plan termina bien" || { fail "plan falla"; tail -5 "$T/plan.out"; }
-grep -q 'PROTEGIDOS: 13' "$T/plan.out" && grep -q 'AJENOS excluidos: 3' "$T/plan.out" && pass "plan informa protegidos y ajenos" || fail "resumen del plan"
+grep -q 'PROTEGIDOS: 13' "$T/plan.out" && grep -q 'AJENOS excluidos: 4' "$T/plan.out" && pass "plan informa protegidos y ajenos" || fail "resumen del plan"
 [[ -f "$D/uninstall/plan.sha256" && -f "$D/uninstall/planned.lst" ]] && pass "plan fijado (sha256 + lista)" || fail "plan sin fijar"
 [[ -f "$D/uninstall/baseline/oaar-role.json" ]] && pass "foto previa del acceso guardada" || fail "falta baseline"
 [[ ! -s "$MOCK_STATE/deleted.lst" ]] && pass "plan no borra nada" || fail "plan borró recursos"

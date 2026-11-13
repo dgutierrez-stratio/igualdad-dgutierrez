@@ -43,6 +43,7 @@ Deja la cuenta AWS donde se instaló un clúster legacy (cloud-provisioner + keo
 - **Nunca** `apply` ni `local-apply` sin haber hecho el `plan`/`local-plan` correspondiente en esta sesión y sin la confirmación explícita del paso 2 y la del paso 4 (y la del paso 7 para lo local). **Nunca** `--no-backup` salvo que la persona lo pida expresamente tras saber qué se pierde. Los flags `--confirm-*` los escribes tú **solo después** de esas confirmaciones.
 - **Nunca** editar a mano `clean.json`/`context.json` ni "arreglar" el filtro para que borre algo: el script lo detecta (sha256) y es lo que se revisó. Para proteger algo extra: `UNINSTALL_PROTECTED_IDS` / `UNINSTALL_PROTECTED_NAMES` en `cluster.env` y volver a `plan`.
 - **No tocar el clúster** (ni kubectl, ni helm, ni escalar controladores): lo pidió así el flujo. Como CAPA/Flux viven dentro del EKS pueden recrear recursos durante una pasada; las pasadas siguientes lo recogen y la regla "recursos no revisados" lo vigila.
+- **Recursos de la migración a GitOps (Loki)**: el bucket `<cluster>-loki` y el rol `loki-<cluster>` (PR keos-fleet#220 §4.4; los crea `gitops-prereqs.sh` o a mano) son `owned` por nombre y se borran con el resto; **Loki no es legacy** pero estos recursos sí son del clúster. Si hay que conservarlos, `UNINSTALL_PROTECTED_IDS`/`UNINSTALL_PROTECTED_NAMES` antes del `plan` (ver `references/ownership-and-protection.md`). La clave KMS `alias/flux-<cluster>` queda como `unowned` (no se borra).
 - Si el remover se corta por `timeout` (código 124) casi seguro es un reintento sin límite de subnets/ENI (limitación conocida, ver `references/ownership-and-protection.md`): mira el log de la pasada, no subas el timeout a ciegas.
 - Si `plan` falla por handlers ausentes, la cuenta no se puede dejar limpia con este remover: parar y avisar, no usar `SKIP_HANDLER_CHECK`.
 - No borrar nada de la cuenta a mano salvo que la persona lo pida (p. ej. una instance profile huérfana que `verify` señale). Lo mismo para contenedores o ficheros que la fase local no liste.
@@ -58,6 +59,6 @@ scripts/uninstall.sh          identify | plan | apply | verify | local-plan | lo
 scripts/filter-resources.sh   filtro PURO (jq): clasifica cada recurso en protected / shared / owned / unowned
 scripts/lib.sh                utilidades; resolución del toolkit; awsx de solo lectura
 references/ownership-and-protection.md   reglas del filtro, motivos, límites conocidos
-tests/run-offline-tests.sh    113 pruebas con aws/python/docker falsos (sin AWS ni docker real); mock/ y fixtures/ ficticios
+tests/run-offline-tests.sh    120 pruebas con aws/python/docker falsos (sin AWS ni docker real); mock/ y fixtures/ ficticios
 ```
 Pruebas: `bash $SK/tests/run-offline-tests.sh` (no toca AWS).

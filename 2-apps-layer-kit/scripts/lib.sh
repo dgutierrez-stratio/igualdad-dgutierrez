@@ -41,7 +41,8 @@ KIT_VARS=(CLUSTER_NAME AWS_ACCOUNT_ID AWS_REGION EXTERNAL_DOMAIN TENANT_NAME APP
   VIRTUALIZER_CREATE_LOADBALANCER USE_TENANT_HOSTS ENABLE_GENAI KEOS_PROFILE UNIVERSE_VERSION
   KEOS_INSTALLER_EXTRA_ARGS KIT_AWS_PROFILE KUBECONFIG_SRC LLM_PROVIDER LLM_MODEL
   NLB_NAMESPACE NLB_SERVICE NLB_IP UNIVERSE_ZIP_URL UNIVERSE_BRANCH CONNECTORS_LOADER_VERSION S3_INIT_PATH
-  ENABLE_BACKUPS_BUCKET BACKUPS_BUCKET_NAME BACKUPS_USER_NAME CUSTOM_SIZES_FILE VELERO_BUCKET VELERO_ROLE SC_POSTGRES)
+  ENABLE_BACKUPS_BUCKET BACKUPS_BUCKET_NAME BACKUPS_USER_NAME CUSTOM_SIZES_FILE VELERO_BUCKET VELERO_ROLE SC_POSTGRES
+  ENABLE_LOKI_BUCKET LOKI_BUCKET_NAME LOKI_ROLE_NAME)
 
 # load_kit_env: aplica defaults y valida. Idempotente.
 load_kit_env() {
@@ -82,6 +83,11 @@ load_kit_env() {
   ENABLE_BACKUPS_BUCKET="${ENABLE_BACKUPS_BUCKET:-false}"
   BACKUPS_BUCKET_NAME="${BACKUPS_BUCKET_NAME:-${CLUSTER_NAME}-backups-${AWS_ACCOUNT_ID}}"
   BACKUPS_USER_NAME="${BACKUPS_USER_NAME:-${CLUSTER_NAME}-backups}"
+  # Prerrequisitos de la MIGRACION a GitOps (ACTIVADO por defecto para igualdad; solo prepara, no crea nada hasta `gitops-prereqs.sh apply`; no los crea el stack). Loki NO es legacy:
+  # lo despliega GitOps (keos-fleet components.loki, overlay s3-eks), que espera el bucket y el rol IRSA `loki-<cluster>` ya creados.
+  ENABLE_LOKI_BUCKET="${ENABLE_LOKI_BUCKET:-true}"
+  LOKI_BUCKET_NAME="${LOKI_BUCKET_NAME:-${CLUSTER_NAME}-loki}"
+  LOKI_ROLE_NAME="${LOKI_ROLE_NAME:-loki-${CLUSTER_NAME}}"
   ENVIRONMENT_SIZE="${ENVIRONMENT_SIZE:-S}"
   # overlay de recursos de ENVIRONMENT_SIZE=CUSTOM (solo se lee con CUSTOM; sustituye por completo al templates/sizes-custom.env del kit)
   CUSTOM_SIZES_FILE="${CUSTOM_SIZES_FILE:-$KIT_DIR/templates/sizes-custom.env}"
@@ -121,7 +127,7 @@ load_kit_env() {
   export CLUSTER_NAME AWS_ACCOUNT_ID AWS_REGION EXTERNAL_DOMAIN TENANT_NAME APPS_LAYER_DIR KEOS_WORKSPACE_DIR \
          APPS_LAYER_IMAGE S3_BUCKET_NAME S3_USER_NAME STACK_NAME ENVIRONMENT_SIZE VIRTUALIZER_CREATE_LOADBALANCER \
          USE_TENANT_HOSTS ENABLE_GENAI KEOS_PROFILE UNIVERSE_VERSION KEOS_INSTALLER_EXTRA_ARGS CONNECTORS_LOADER_VERSION S3_INIT_PATH \
-         ENABLE_BACKUPS_BUCKET BACKUPS_BUCKET_NAME BACKUPS_USER_NAME
+         ENABLE_BACKUPS_BUCKET BACKUPS_BUCKET_NAME BACKUPS_USER_NAME ENABLE_LOKI_BUCKET LOKI_BUCKET_NAME LOKI_ROLE_NAME
   validate_kit_vars
 }
 
@@ -143,7 +149,7 @@ validate_kit_vars() {
     [[ "$CUSTOM_SIZES_FILE" == /* ]] || die "CUSTOM_SIZES_FILE debe ser una ruta absoluta (valor: '$CUSTOM_SIZES_FILE')"
     [[ -f "$CUSTOM_SIZES_FILE" && -r "$CUSTOM_SIZES_FILE" ]] || die "ENVIRONMENT_SIZE=CUSTOM pero no se puede leer el overlay de recursos CUSTOM_SIZES_FILE=$CUSTOM_SIZES_FILE"
   fi
-  for v in VIRTUALIZER_CREATE_LOADBALANCER USE_TENANT_HOSTS ENABLE_GENAI ENABLE_BACKUPS_BUCKET; do
+  for v in VIRTUALIZER_CREATE_LOADBALANCER USE_TENANT_HOSTS ENABLE_GENAI ENABLE_BACKUPS_BUCKET ENABLE_LOKI_BUCKET; do
     [[ "${!v}" == true || "${!v}" == false ]] || die "$v debe ser true o false (valor: '${!v}')"
   done
   [[ "$UNIVERSE_VERSION" =~ ^[0-9A-Za-z._-]+$ ]] || die "UNIVERSE_VERSION '$UNIVERSE_VERSION' no valida (solo [0-9A-Za-z._-]: forma parte del nombre del zip y de la URL)"
@@ -161,6 +167,7 @@ validate_kit_vars() {
   [[ "$S3_USER_NAME" =~ ^[A-Za-z0-9+=,.@_-]{1,64}$ ]] || die "S3_USER_NAME '$S3_USER_NAME' no es un nombre de usuario IAM valido"
   [[ "$STACK_NAME" =~ ^[A-Za-z][A-Za-z0-9-]{0,127}$ ]] || die "STACK_NAME '$STACK_NAME' no valido"
   validate_backups_vars
+  validate_loki_vars
   [[ "$LLM_PROVIDER" =~ ^[A-Za-z0-9._-]*$ ]] || die "LLM_PROVIDER solo admite [A-Za-z0-9._-]"
   [[ "$LLM_MODEL" =~ ^[A-Za-z0-9._:/-]*$ ]] || die "LLM_MODEL solo admite [A-Za-z0-9._:/-]"
   [[ "$KEOS_WORKSPACE_DIR" == /* ]] || die "KEOS_WORKSPACE_DIR debe ser una ruta absoluta"
@@ -181,6 +188,19 @@ validate_backups_vars() {
   local p
   for p in "${BACKUPS_PROTECTED_USERS[@]}" "${KIT_AWS_PROFILE:-}" "${CP_PROFILE:-}"; do
     [[ -z "$p" || "$BACKUPS_USER_NAME" != "$p" ]] || die "BACKUPS_USER_NAME '$BACKUPS_USER_NAME' es una identidad PROTEGIDA (usuario cloud-provisioner, perfil igualdad o el perfil AWS del kit): elige otro"
+  done
+}
+
+# Loki (prerrequisito de GitOps): solo se validan los nombres si esta habilitado. El rol DEBE llamarse loki-<cluster> (el overlay s3-eks de
+# keos-fleet fija ese nombre) y no puede ser una identidad protegida.
+validate_loki_vars() {
+  [[ "$ENABLE_LOKI_BUCKET" == true ]] || return 0
+  [[ "$LOKI_BUCKET_NAME" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || die "LOKI_BUCKET_NAME '$LOKI_BUCKET_NAME' no es un nombre de bucket valido (3-63, minusculas)"
+  [[ "$LOKI_ROLE_NAME" =~ ^[A-Za-z0-9+=,.@_-]{1,64}$ ]] || die "LOKI_ROLE_NAME '$LOKI_ROLE_NAME' no es un nombre de rol IAM valido"
+  [[ "$LOKI_ROLE_NAME" == "loki-${CLUSTER_NAME}" ]] || warn "LOKI_ROLE_NAME='$LOKI_ROLE_NAME' no es loki-${CLUSTER_NAME}: el overlay s3-eks de keos-fleet espera ese nombre"
+  local p
+  for p in "${BACKUPS_PROTECTED_USERS[@]}" "${KIT_AWS_PROFILE:-}" "${CP_PROFILE:-}"; do
+    [[ -z "$p" || "$LOKI_ROLE_NAME" != "$p" ]] || die "LOKI_ROLE_NAME '$LOKI_ROLE_NAME' es una identidad PROTEGIDA: elige otro"
   done
 }
 

@@ -169,6 +169,8 @@ Hasta que acaba no existen NLB, PVC ni namespaces `keos-*`. `keos install` **no*
 
 ## 13b. Post-install OPCIONAL (avisar, preguntar, imprimir; lo ejecuta LA PERSONA USUARIA dentro del contenedor)
 
+> **Lecciones (igualdad, 2026-11-12).** (1) **El parche PLT-5162 del pushgateway va SIEMPRE el último** y con `annotate reconcile.fluxcd.io/requestedAt`: cualquier `keos ...` posterior (incluido repetir `keos monitoring`) regenera el ConfigMap `00-pushgateway-helm-chart-default-values` y pisa el parche (el último escritor es `OpenAPI-Generator`, el cliente de keos), y Flux entra en backoff sin reintentar a tiempo. `render-postinstall.sh` ya lo imprime al final. Si el HR sigue en `ValuesError`, repetir SOLO ese bloque. (2) **Tras `keos install` `keos.yaml` cambia de sangría** (`falco:` pasa de 4 a 8 espacios), por eso el `sed` de falco y el aviso usan `^ *falco:`; comprobar con `grep -n -A1 'falco:' /workspace/keos.yaml` que sale `enabled: true` antes del `patch`/`keos falco`.
+
 Solo cuando `keos install` ha terminado (validar en solo lectura: tenant `keos` Active, `cct-orchestrator` Running; ver 14a). **Ninguna opción es obligatoria** según la guía de origen. La skill:
 1. **Avisa** de que tras `keos install` el clúster **no** tiene monitorización, Velero, backups programados, central logging ni falco (el del cliente sí), y de qué hace cada opción y su riesgo:
 
@@ -195,49 +197,63 @@ sobre Command Center (CCT), **con S3 en vez de HDFS**. La skill NO reimplementa 
 
 ```bash
 export AWS_PAGER=""; unset APPS_LAYER_DIR          # una APPS_LAYER_DIR vieja pisa el defecto (gotchas.md); el script la ignora avisando
-AL="bash $SK/scripts/apps-layer.sh --dir $DIR"      # sin subcomando: ayuda. `$AL env` imprime lo que se pasa al kit (sin secretos)
+al(){ bash $SK/scripts/apps-layer.sh --dir $DIR "$@"; }      # FUNCIÓN (zsh no divide variables multi-palabra). Sin subcomando: ayuda. `al env` imprime lo que se pasa al kit (sin secretos)
 ```
 Variables (de `cluster.env` o `kit.env` del kit; solo las dos entradas de la skill son obligatorias): `CLUSTER_NAME`, `AWS_ACCOUNT_ID`, `AWS_REGION`, `EXTERNAL_DOMAIN` (`<cluster>.desa.int`),
 `TENANT_NAME=dev`, `ENABLE_GENAI=true` (exige `LLM_TOKEN`), `KEOS_PROFILE=full|minimal`, `ENVIRONMENT_SIZE=S` (**`S`, `PIT` o `CUSTOM`**; otro valor aborta; ver abajo), `CUSTOM_SIZES_FILE` (solo con `CUSTOM`), `UNIVERSE_VERSION=15.1.0`,
 `UNIVERSE_BRANCH` (def. el tag `UNIVERSE_VERSION`, `15.1.0`; ref del `.lst`), imagen `...apps-layer-automation:15.1-0.1.0-M2` (inmutable; haz `docker pull` antes). Directorio de ejecución **efímero**
 `${TMPDIR:-/tmp}/apps-layer-<cluster>` (700, con secretos; regenerable con `render`), montado en `/apps-layer`.
 
-**14a. Prerrequisitos (solo lectura)**: `$AL prereqs`. OK si: `keos install` terminado (tenant `keos` **Active**, `cct-orchestrator` **Running** en `keos-cct`, hostname del NLB en
+**14a. Prerrequisitos (solo lectura)**: `al prereqs`. OK si: `keos install` terminado (tenant `keos` **Active**, `cct-orchestrator` **Running** en `keos-cct`, hostname del NLB en
 `keos-ingress/ingress-nginx-controller`), `sts` del `CP_PROFILE` = cuenta, docker, `keos.yaml` en el workspace, herramientas, acceso a `qa.int.stratio.com` (VPN; aviso si no resuelve) y
 **`gh` autenticado con acceso a `Stratio/kubernetes-universe`** (para el `universe-images.lst` fresco; si no: **PARAR** y pedir `gh auth login` / acceso). Aviso si hay otro contenedor
 `keos-installer` en marcha (un `keos install` sin terminar escribe en el mismo workspace). *Si falla*: tenant no Active / pods CCT no Running => `keos install` no ha terminado, no seguir.
-`$AL plan` hace además `s3-requisites plan` + `render --dry-run` sin escribir nada.
+`al plan` hace además `s3-requisites plan` + `render --dry-run` sin escribir nada.
 
 **Tamaños (`ENVIRONMENT_SIZE`)**: apps-layer solo conoce `S` y `PIT` y carga `apps/<app>/sizes/<tamaño>` **después** del env: en las apps que exportan valores fijos (17 de 38 en `branch-15.1-0.1` en el conjunto upstream completo con HDFS; 15 de 36 en nuestro kit S3) **pisa** lo que pongas en el YAML. Con `ENVIRONMENT_SIZE=CUSTOM` (`init-cluster.sh --dir $DIR --set ENVIRONMENT_SIZE=CUSTOM`; solo si la persona usuaria quiere los recursos de la guía/propios, avisando)
 no se carga ningún `sizes/` y el kit inyecta en el `env:` de cada app las variables de recursos de su **overlay propio** `templates/sizes-custom.env` (valores de la guía de la PR para las apps que cubre y de `sizes/S` para el resto; sin hosts ni valores del cliente). **No existe `sizes/CUSTOM` upstream**: es mecanismo nuestro. `CUSTOM_SIZES_FILE=<ruta absoluta>` (en `cluster.env`/`kit.env`) usa una copia editada y **sustituye por completo** al overlay del kit.
 `render` **aborta** con `app X: falta VAR` si a alguna app le falta una variable de la lista cerrada del kit (`custom_required_vars` en `lib.sh`) y `check` lo repite; con `S`/`PIT` el render es idéntico al de siempre. Quirks: discovery, intelligence y rocket no consumen `MEMORY_LIMITS`; `governance-map` cruza memorias; solo postgres/pgbouncer llevan unidad. **Avisar de la cabida**: los requests del overlay suman aprox. 8,6 vCPU y 45 GB (más ~2 vCPU y 8 GB de los workers de rocket; estimación del propio overlay) y los límites ~60 vCPU: pueden no caber en clústeres pequeños (3 x m6a.4xlarge sí). **No verificado** contra `apps-installer`. Detalle: `2-apps-layer-kit/README.md`, sección `ENVIRONMENT_SIZE=CUSTOM`.
 
-**14b. Requisitos AWS de la variante S3** (crean recursos; dry-run primero): `$AL s3 plan` (solo lectura: qué existe y qué crearía) y, con OK explícito, **la persona usuaria** en SU terminal
-`$AL s3 apply --apply` (pide terminal y escribir el clúster). Crea el stack CloudFormation `<cluster>-requisites`: bucket `<cluster>-internal-<cuenta>` (versionado, cifrado, **DeletionPolicy Retain**),
-usuario IAM `<cluster>-s3` con `s3:*` solo sobre ese bucket, su access key y el secreto en Secrets Manager. Luego `$AL s3 env`: lee el secreto SIN imprimirlo y deja `S3_BUCKET_ACCESS_KEY`,
-`S3_BUCKET_SECRET_KEY` y `AWS_REGION` solo en `<APPS_LAYER_DIR>/.env` (600). **Validación**: `$AL s3 status` => stack `CREATE_COMPLETE`, bucket accesible, usuario y secreto existen, las tres
+**14b. Requisitos AWS de la variante S3** (crean recursos; dry-run primero): `al s3 plan` (solo lectura: qué existe y qué crearía) y, con OK explícito, **la persona usuaria** en SU terminal
+`al s3 apply --apply` (pide terminal y escribir el clúster). Crea el stack CloudFormation `<cluster>-requisites`: bucket `<cluster>-internal-<cuenta>` (versionado, cifrado, **DeletionPolicy Retain**),
+usuario IAM `<cluster>-s3` con `s3:*` solo sobre ese bucket, su access key y el secreto en Secrets Manager. Luego `al s3 env`: lee el secreto SIN imprimirlo y deja `S3_BUCKET_ACCESS_KEY`,
+`S3_BUCKET_SECRET_KEY` y `AWS_REGION` solo en `<APPS_LAYER_DIR>/.env` (600). **Validación**: `al s3 status` => stack `CREATE_COMPLETE`, bucket accesible, usuario y secreto existen, las tres
 variables "presente". *Si falla*: conflictos de nombre (bucket global, usuario/secreto ya usados) => cambiar `S3_BUCKET_NAME`/`S3_USER_NAME`; secreto "programado para borrado" => el kit da el comando.
 (Clúster de referencia `igualdad-dgutierrez`: stack `igualdad-dgutierrez-requisites` CREATE_COMPLETE, bucket `igualdad-dgutierrez-internal-821111360971`.)
 
-**14b-bis. Bucket de backups OPCIONAL (migración a GitOps; apps-layer no lo usa)**: recurso más del mismo stack `<cluster>-requisites`, **desactivado por defecto** (`ENABLE_BACKUPS_BUCKET=false`: no cambia nada).
-Para activarlo pon en `cluster.env` `export ENABLE_BACKUPS_BUCKET=true` (opcional `BACKUPS_BUCKET_NAME`, def. `<cluster>-backups-<cuenta>`, y `BACKUPS_USER_NAME`, def. `<cluster>-backups`) y ejecuta `$AL s3 plan` (solo lectura;
-aborta ante un bucket/usuario/secreto homónimo que no sea del stack) -> la persona usuaria `$AL s3 apply --apply` (sobre el stack existente es una ACTUALIZACIÓN que solo AÑADE bucket versionado+cifrado con **Retain**,
-usuario IAM `s3:*` solo sobre él, access key y secreto; el texto de confirmación lo lista) -> `$AL s3 env` (añade `BACKUPS_S3_BUCKET_{ACCESS_KEY,SECRET_KEY,NAME,REGION}` al `.env`, 600, sin imprimir; si falta un `apply` avisa)
--> `$AL s3 backups-info` (solo lectura, sin secretos: bucket, región, usuario, ARN del secreto y el comando `get-secret-value` sin ejecutar). Para keos-fleet: `backups.s3BucketName`/`s3BucketRegion` y `BACKUPS_S3_BUNDLE` (README del kit).
+**14b-bis. Bucket de backups (migración a GitOps; apps-layer no lo usa)**: recurso más del mismo stack `<cluster>-requisites`. **`init-cluster.sh` lo deja ACTIVADO (`ENABLE_BACKUPS_BUCKET=true`) en clústeres nuevos**: así el bucket se crea con el `s3 apply` del 14b y ya existe cuando se migra system-services (`flux keos cluster migrate` falla con "The GitOps backups bucket does not exist (<cluster>-backups-<cuenta> not in S3)" si el stack solo tiene el bucket interno; el de Velero es otro). Para desactivarlo: `init-cluster.sh --dir $DIR --set ENABLE_BACKUPS_BUCKET=false`. Si el `cluster.env` es antiguo y no lo tiene, el kit asume `false`: añádelo con `--set` y repite `s3 plan`/`s3 apply` (actualización que solo añade).
+Configuración (opcional `BACKUPS_BUCKET_NAME`/`BACKUPS_USER_NAME`; con el flag en `cluster.env` basta) (opcional `BACKUPS_BUCKET_NAME`, def. `<cluster>-backups-<cuenta>`, y `BACKUPS_USER_NAME`, def. `<cluster>-backups`) y ejecuta `al s3 plan` (solo lectura;
+aborta ante un bucket/usuario/secreto homónimo que no sea del stack) -> la persona usuaria `al s3 apply --apply` (sobre el stack existente es una ACTUALIZACIÓN que solo AÑADE bucket versionado+cifrado con **Retain**,
+usuario IAM `s3:*` solo sobre él, access key y secreto; el texto de confirmación lo lista) -> `al s3 env` (añade `BACKUPS_S3_BUCKET_{ACCESS_KEY,SECRET_KEY,NAME,REGION}` al `.env`, 600, sin imprimir; si falta un `apply` avisa)
+-> `al s3 backups-info` (solo lectura, sin secretos: bucket, región, usuario, ARN del secreto y el comando `get-secret-value` sin ejecutar). Para keos-fleet: `backups.s3BucketName`/`s3BucketRegion` y `BACKUPS_S3_BUNDLE` (README del kit).
 *Si falla*: `apply` rechaza `ENABLE_BACKUPS_BUCKET=false` sobre un stack que ya tiene backups (los quitaría) y cambiar los nombres (sería un reemplazo).
-**14c. LLM_TOKEN**: `$AL token <yaml-del-laboratorio>` (o `export LLM_TOKEN=...` y sin argumento). La skill **nunca lee ni imprime el valor**: solo "importado (N caracteres)". Sin espacios ni `* ? [`
+**14b-ter. Prerrequisitos de la migración a GitOps: Loki (ACTIVADO por defecto; `ENABLE_LOKI_BUCKET=false` lo omite; no crea nada hasta el `apply --apply` de la persona usuaria)**: **Loki NO es legacy** (keos-installer 1.4.2 no lo despliega; el central logging es fluentd + OpenSearch):
+lo despliega GitOps (`flux keos`, `components.loki`, overlay `s3-eks` con IRSA) y espera ya creados el bucket `<cluster>-loki` y el rol `loki-<cluster>` (confianza `system:serviceaccount:keos-observability:loki`, política inline `loki-s3`), como en la PR
+Stratio/keos-fleet#220 §4.4. Si se va a migrar, hay que crearlos antes (si no, Loki no arranca). Con el flag activo (por defecto): `al gitops plan` (solo lectura; necesita el EKS vivo) -> la persona usuaria `al gitops apply --apply`
+(terminal, teclear el clúster; **solo crea**, lo existente se adopta sin modificarlo, divergencias solo se avisan, nunca borra; no es un stack: así puede adoptar) -> `al gitops info` (sin secretos: bucket, región, ARN del rol y bloque `components.loki`).
+El bloque debe fijar `installationType: s3-eks` (flux-keos aún no lo deriva en EKS). **alloy y tempo no tienen paso y van DESACTIVADOS por defecto** (`components.alloy`/`tempo` `enabled: false`, el bloque que imprime `info` lo dice). No cubre la clave KMS / rol de kustomize-controller / rol IRSA de EFS (se crean al migrar). Borrado: `legacy-eks-uninstall`.
+**14c. LLM_TOKEN**: `al token <yaml-del-laboratorio>` (o `export LLM_TOKEN=...` y sin argumento). La skill **nunca lee ni imprime el valor**: solo "importado (N caracteres)". Sin espacios ni `* ? [`
 (`deploy-apps.sh` exporta el env del tenant sin comillas). Después `render` lo inyecta también en el YAML del tenant (600). Con `ENABLE_GENAI=false` se omiten genai-*, `datamarket-agent` y `pit`.
 
-**14d. Universo fresco (OBLIGATORIO antes de cada lanzamiento)**: `$AL fetch` (lo hace también `launch` solo; nunca reutiliza una copia previa) descarga a `<APPS_LAYER_DIR>`:
+**14c-bis. `genai-api` con tamaño S (OOM conocido)**: con `ENVIRONMENT_SIZE=S` (y con `CUSTOM` sin tocar) `genai-api` tiene request/límite de 2048 MB y muere por OOMKilled al instalar la chain de governance (poetry), lo que deja `genai-ui` en CrashLoopBackOff. Con `ENABLE_GENAI=true` **avisar y proponer** (AskUserQuestion; recomendado) un overlay propio fuera del repo del kit con SOLO `genai-api` a requests 4096 / límite 6144 MB:
+```bash
+F="$DIR/sizes-custom.env"; cp "$KIT/templates/sizes-custom.env" "$F"
+sed -i '/^\[genai-api\]/,/^$/ { s/^MEMORY_REQUESTS=.*/MEMORY_REQUESTS=4096/; s/^MEMORY_LIMITS=.*/MEMORY_LIMITS=6144/ }' "$F"
+bash $SK/scripts/init-cluster.sh --dir $DIR --set ENVIRONMENT_SIZE=CUSTOM --set CUSTOM_SIZES_FILE="$(cd "$DIR" && pwd)/sizes-custom.env"
+al render --apply && al check      # el YAML del tenant debe llevar MEMORY_REQUESTS '4096' / MEMORY_LIMITS '6144' en genai-api
+```
+Es una diferencia respecto al kit: documentarla. Verificada en igualdad (2026-11-12): `genai-api` y `genai-ui` Running sin reinicios tras instalar con ese overlay.
+
+**14d. Universo fresco (OBLIGATORIO antes de cada lanzamiento)**: `al fetch` (lo hace también `launch` solo; nunca reutiliza una copia previa) descarga a `<APPS_LAYER_DIR>`:
 `kubernetes-universe-descriptors-<UNIVERSE_VERSION>.zip` (curl `-fSL` de `http://qa.int.stratio.com/repository/paas/kubernetes-universe/descriptors/...`, `unzip -t`, mv atómico, imprime tamaño y sha256) y
 `<UNIVERSE_VERSION>-universe-images.lst` (`gh api` raw de `Stratio/kubernetes-universe` `ref=15.1.0` (tag de `UNIVERSE_VERSION`); no vacío y con `connectors-loader`). Se montan sobre los embebidos en la imagen
 (el `.lst` de la imagen está desfasado: connectors-loader 2.2.0 frente a 2.2.3). El `.lst` fresco sigue siendo obligatorio, pero el kit fija por defecto `CONNECTORS_LOADER_VERSION=2.2.0` (como la PR keos-fleet#220) y el hook ignora el `.lst` para el loader; para usar el del `.lst` (2.2.3) deja `CONNECTORS_LOADER_VERSION=` vacía en `kit.env`. Si cambia `UNIVERSE_VERSION` cambian nombres, URL y rama; **no** se usa un zip/lst de otra versión.
 
-**14e. Render + check**: `$AL render` (dry-run) y `$AL render --apply` (YAML raíz `<cluster>.yaml` y de tenant `<cluster>-<tenant>.yaml`, `.env`, `kube-config` y `aws/` solo con el perfil `cloud-provisioner`);
-`$AL check`. **Validación**: termina en `RESULTADO: sin KO` y muestra `LLM_TOKEN OK (N caracteres) → genai-*: genai-api, genai-litellm`; comprueba además `.env` 600 con las claves S3 (nombres), zip y `.lst`
+**14e. Render + check**: `al render` (dry-run) y `al render --apply` (YAML raíz `<cluster>.yaml` y de tenant `<cluster>-<tenant>.yaml`, `.env`, `kube-config` y `aws/` solo con el perfil `cloud-provisioner`);
+`al check`. **Validación**: termina en `RESULTADO: sin KO` y muestra `LLM_TOKEN OK (N caracteres) → genai-*: genai-api, genai-litellm`; comprueba además `.env` 600 con las claves S3 (nombres), zip y `.lst`
 válidos (KO si falta el `.lst` o no contiene `connectors-loader`), YAML sin hdfs y con `connector-s3`, **y `connector-s3` con `INIT_PATH` no vacío (KO si falta o es exactamente `/`: errata `INTI_PATH` y el driver S3 rechaza la raíz; lo fija `S3_INIT_PATH`, def. `/<bucket>`)**. *Si falla*: cada KO dice qué script repetir.
 
-**14f. Lanzamiento (lo ejecuta LA PERSONA USUARIA)**: `$AL launch` descarga el universo fresco e **imprime** el `docker run` (la skill nunca lo ejecuta: `--run`/`--force` rechazados). Monta `<APPS_LAYER_DIR>` en `/apps-layer`,
+**14f. Lanzamiento (lo ejecuta LA PERSONA USUARIA)**: `al launch` descarga el universo fresco e **imprime** el `docker run` (la skill nunca lo ejecuta: `--run`/`--force` rechazados). Monta `<APPS_LAYER_DIR>` en `/apps-layer`,
 el workspace en `/workspace`, `docker.sock`, `<APPS_LAYER_DIR>/aws` en `/root/.aws:ro`, el zip y el `.lst` sobre `/apps-layer-automation/universe/`, y lleva `--add-host admin.<EXTERNAL_DOMAIN>:<IP del NLB>`
 (`desa.int` no está delegado; `NLB_IP` si no se resuelve) y `--net host --cgroupns host`. Dentro del contenedor:
 ```bash
@@ -249,16 +265,16 @@ apps-installer <cluster>-dev.yaml        # tenant dev
 El entrypoint recrea el contenedor hermano `keos-installer_<cluster>` (hace `docker rm -f` del anterior: **no lances un segundo contenedor apps-layer**), `apps-installer` sube la memoria de `cct-orchestrator`
 a 10Gi y hace `helm rollback cct` al salir (también con Ctrl-C). Relanzar es seguro: salta tenants/apps `success`+`ready`. Un contenedor ya arrancado no ve los ficheros nuevos: hay que relanzarlo.
 
-**14g. Checkpoints y validación (solo lectura, `$AL check` y kubectl con el kubeconfig propio)**:
+**14g. Checkpoints y validación (solo lectura, `al check` y kubectl con el kubeconfig propio)**:
 1. **Tras `connectors-management` (tenant dev) — PARAR si falla**: `kubectl -n dev-apps exec <pod connectors-management> -- curl -s "http://connectors-management.dev-apps/v1/api/connector/findByName?name=sscc-s3"`
-   (`$AL check --no-aws` lo hace y marca KO). **Vacío => parar** (Ctrl-C; el `trap` hace `helm rollback cct`): virtualizer, rocket, eureka-agent y connector-s3 no funcionarán. Es el **riesgo abierto principal**: sin verificar contra el connectors-loader usado (2.2.0 por defecto; 2.2.3 con `CONNECTORS_LOADER_VERSION` vacía).
+   (`al check --no-aws` lo hace y marca KO). **Vacío => parar** (Ctrl-C; el `trap` hace `helm rollback cct`): virtualizer, rocket, eureka-agent y connector-s3 no funcionarán. Es el **riesgo abierto principal**: sin verificar contra el connectors-loader usado (2.2.0 por defecto; 2.2.3 con `CONNECTORS_LOADER_VERSION` vacía).
 2. Imágenes: las de `stratio-releases.repo.stratio.com` llegan por el pull-through de ECR; `ImagePullBackOff` => mirar ahí primero.
 3. Apps del tenant en CCT (`check`: pods con `cct.stratio.com/application_id`) y pods `Running/Completed` en `keos-core`, `dev-apps`, `dev-datastores`, `dev-rocket`, `dev-genai`, `dev-intelligence`, `dev-dlc`.
 4. Variante S3: **sin** `hdfs` ni `connector-dfs-hdfs`; `connector-s3` (`dg-s3-agent`); virtualizer/rocket/eureka-agent con `s3a://<bucket>`; `pit` con `HDFS_USAGE_POLICY_POLICY_ENABLED=false`; ConfigMap `s3-config` en `dev-rocket`.
 *Si falla una app*: copiar el error y relanzar `apps-installer` (reanuda); no borrar nada a mano en CCT (no hay desinstalador completo).
 
 **14h. Backups y reporters de `enviroment-ready` (OPCIONAL, tras las apps; guía §7.5-7.6)**. La skill **avisa y pregunta** (AskUserQuestion) antes de nada; la guía los hace para el cliente, no son obligatorios y **actúan sobre el clúster**. Si acepta:
-1. `$AL backups-env --dry-run` (muestra el contenido) y `$AL backups-env`: escribe **solo** `<APPS_LAYER_DIR>/backups.env` (600, 4 líneas **sin comillas**: `AWS_ACCOUNT_ID`, `AWS_REGION`, `AWS_BUCKET_NAME`=`VELERO_BUCKET`, `AWS_IAM_ROLE_NAME`=`VELERO_ROLE` (nombre, no ARN); `SC_POSTGRES` opcional; `.bak` si cambia) e imprime los avisos. No ejecuta aws/kubectl/docker/`enviroment-ready`.
+1. `al backups-env --dry-run` (muestra el contenido) y `al backups-env`: escribe **solo** `<APPS_LAYER_DIR>/backups.env` (600, 4 líneas **sin comillas**: `AWS_ACCOUNT_ID`, `AWS_REGION`, `AWS_BUCKET_NAME`=`VELERO_BUCKET`, `AWS_IAM_ROLE_NAME`=`VELERO_ROLE` (nombre, no ARN); `SC_POSTGRES` opcional; `.bak` si cambia) e imprime los avisos. No ejecuta aws/kubectl/docker/`enviroment-ready`.
    Es el bucket y el rol IRSA de **Velero** (paso 10), no el de `ENABLE_BACKUPS_BUCKET` (otro bucket con claves estáticas, para GitOps). Comprueba antes que `aws s3api head-bucket` y `iam get-role` los encuentran (solo lectura) y que Velero está desplegado (13b).
 2. **La persona usuaria** lo lanza dentro del contenedor de apps-layer (el que imprimió `launch`): `cd /apps-layer && enviroment-ready --backups backups.env`. Hace `keos backup create idp vault` (puntual), escribe `override_vars/velero.yaml` en el workspace si no existe, **relanza `keos backup velero`** y crea PVC `<pg>-backup-pvc` (40Gi) + `PgBackup` diario 01:00 por PgCluster si no existen.
    Avisar: los PVC `<pgcluster>-backup-pvc` quedan `Pending` (`WaitForFirstConsumer`) hasta el primer backup: es normal. Con IRSA necesita el override `keos-backup-velero.yaml` (12a); los backups diarios de IdP/vault son `keos backup schedule vault idp` (13b). El escalonado y los PVC 50/50/80Gi del cliente **no se adoptan**. Validación: `kubectl -n keos-backup get bsl aws` = `Available`.

@@ -599,6 +599,29 @@ cd /stratio/e/igualdad && unset APPS_LAYER_DIR             # una APPS_LAYER_DIR 
   `thanos-query.keos-metrics:9090` porque la GlobalNetworkPolicy usa `namespaceSelector: name == 'keos-reports'` y el namespace no lleva esa etiqueta; el parche cambia el selector a `kubernetes.io/metadata.name == 'keos-reports'` (comando en el aviso de `backups-env.sh`) y **un nuevo `--reporter` lo pisa**.
 - **No probado**: ni `enviroment-ready` ni `backups-env.sh` se han ejecutado contra `apps-installer` ni un clúster real.
 
+## Prerrequisitos de la migración a GitOps (Loki, activado por defecto; es el único que crea el kit) — «14b-ter» en la skill
+
+Esta instalación **replica el legacy** y se migra después con `flux keos cluster migrate` (Stratio/keos-fleet#220, `migracion-legacy-gitops.md` §3-§4). GitOps
+**añade componentes que el legacy no tiene** y que esperan recursos de AWS ya creados. **Loki no es legacy**: keos-installer 1.4.2 no lo despliega (el central
+logging es fluentd + OpenSearch); lo despliega GitOps con `components.loki` (overlay `s3-eks`, IRSA). Si no existen su bucket y su rol antes de migrar, Loki no arranca.
+
+| Prerrequisito de la PR | ¿Lo crea esta instalación? |
+|---|---|
+| Bucket `<cluster>-loki` + rol IRSA `loki-<cluster>` (SA `keos-observability:loki`, política inline `loki-s3`) — §4.4 | **Con el kit, activado por defecto** (`ENABLE_LOKI_BUCKET=true`; `false` lo omite; no crea nada hasta `apply`) |
+| Bucket de backups de postgres + usuario con claves estáticas (`BACKUPS_S3_BUNDLE`) — §4.5 | Opcional, con el kit (`ENABLE_BACKUPS_BUCKET`, ver 14b-bis) |
+| Clave KMS `alias/flux-<cluster>` y rol `flux-kustomize-controller-<cluster>` (SOPS) — §4.1, §4.2 | No: se crean a mano al migrar (los hace el que migra) |
+| Rol IRSA del driver de EFS `<cluster>-efs-csi` — §4.3 | No: el legacy usa el rol de los nodos (paso 11) |
+
+```bash
+export ENABLE_LOKI_BUCKET=true                         # defecto; false en cluster.env o kit.env lo omite
+2-apps-layer-kit/scripts/gitops-prereqs.sh plan        # solo lectura: OIDC del EKS vivo, estado de bucket/rol/política, qué crearía
+2-apps-layer-kit/scripts/gitops-prereqs.sh apply       # CREA lo que falte (terminal; teclear el clúster). Adopta lo existente sin modificarlo; nunca borra
+2-apps-layer-kit/scripts/gitops-prereqs.sh info        # solo lectura, sin secretos: bucket, región, ARN del rol y el bloque components.loki del RSIP
+```
+
+Necesita el EKS vivo (lee su OIDC). `alloy` y `tempo` no tienen paso y quedan **desactivados por defecto** (`enabled: false`). Borrado: `legacy-eks-uninstall` (los nombres llevan el del clúster).
+Detalle: `2-apps-layer-kit/README.md`, "Prerrequisitos de la migración a GitOps: Loki".
+
 ## 14. Eliminación de los recursos de AWS
 
 Solo cuando haya que desmontar el entorno, y lo hace el propietario del entorno con su script (entorno conda
