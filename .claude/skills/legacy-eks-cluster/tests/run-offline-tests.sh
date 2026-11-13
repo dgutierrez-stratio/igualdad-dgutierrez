@@ -250,7 +250,7 @@ BKB=demo-x-backups-111111111111; BKU=demo-x-backups; BKENV=(MOCK_BACKUPS_BUCKET=
 # 9a) envoltorio
 : > "$MOCK_LOG"; out="$(al s3 backups-info 2>&1)"; rc=$?
 [[ $rc -eq 0 ]] && grep -q 'STUB s3-requisites args=\[backups-info\] CLUSTER_ENV_FILE=' <<<"$out" && grep -q '^kitstub :: s3-requisites backups-info$' "$MOCK_LOG" && pass "s3 backups-info delega en el kit (solo lectura)" || fail "s3 backups-info"
-grep -q 'BK= BKN= BKU=' <<<"$out" && pass "sin variables de backups en el shell: no se reenvía nada (el kit usa cluster.env/kit.env/defectos: desactivado)" || fail "no debería reenviar ENABLE_BACKUPS_BUCKET"
+grep -q 'BK=true BKN= BKU=' <<<"$out" && pass "sin variables de backups en el shell: no se reenvía nada (init-cluster.sh deja ENABLE_BACKUPS_BUCKET=true en cluster.env)" || fail "no debería reenviar ENABLE_BACKUPS_BUCKET"
 out="$(ENABLE_BACKUPS_BUCKET=true BACKUPS_BUCKET_NAME=otro-backups-9 BACKUPS_USER_NAME=otro-bk al s3 plan 2>&1)"
 grep -q 'BK=true BKN=otro-backups-9 BKU=otro-bk' <<<"$out" && pass "ENABLE_BACKUPS_BUCKET/BACKUPS_BUCKET_NAME/BACKUPS_USER_NAME exportadas en el shell se pasan al kit" || fail "reenvío de variables de backups: $out"
 cp "$D/cluster.env" "$T/cluster.env.bk"; printf 'export ENABLE_BACKUPS_BUCKET=true\n' >> "$D/cluster.env"
@@ -258,7 +258,7 @@ out="$(ENABLE_BACKUPS_BUCKET=false al s3 plan 2>&1)"
 grep -q 'BK=false' <<<"$out" && pass "una variable exportada en el shell gana a cluster.env (el kit respeta ese orden)" || fail "prioridad del entorno"
 out="$(al env 2>&1)"; grep -q 'bucket de backups (opcional, GitOps)=enabled:true bucket=demo-x-backups-111111111111 usuario=demo-x-backups' <<<"$out" && pass "env muestra el estado de backups desde cluster.env (y nombres por defecto)" || fail "env de backups: $out"
 cp "$T/cluster.env.bk" "$D/cluster.env"
-out="$(al env 2>&1)"; grep -q 'enabled:false' <<<"$out" && pass "env: backups desactivado por defecto" || fail "env sin backups"
+out="$(al env 2>&1)"; grep -q 'enabled:true' <<<"$out" && pass "env: bucket de backups activado por defecto en clústeres nuevos (init-cluster.sh)" || fail "env sin backups"
 out="$(al s3 apply 2>&1)"; grep -q 'ENABLE_BACKUPS_BUCKET=true' <<<"$out" && grep -q 'DRY-RUN' <<<"$out" && pass "s3 apply sin --apply sigue siendo dry-run y menciona el bucket de backups" || fail "dry-run s3 apply"
 out="$(al s3 delete 2>&1)"; grep -q -- '--delete-backups' <<<"$out" && pass "s3 delete se rechaza y remite a teardown (--delete-backups)" || fail "mensaje de s3 delete"
 al s3 nope >/dev/null 2>&1 && fail "s3 desconocido aceptado" || pass "s3 desconocido rechazado"
@@ -362,8 +362,14 @@ pi() { "$S/render-postinstall.sh" --dir "$1" 2>&1; }
 out="$(pi "$P3")"; rc=$?
 [[ $rc -eq 0 ]] && grep -q 'AVISO' <<<"$out" && grep -q 'ENABLE_MONITORING' <<<"$out" && grep -q 'ENABLE_FALCO' <<<"$out" && grep -q 'ENABLE_BACKUP_SCHEDULE' <<<"$out" && ! grep -qE '^(keos|sed|kubectl) ' <<<"$out" && pass "(e) render-postinstall sin flags: rc=0, AVISO con las opciones y ningún comando" || fail "(e) postinstall sin flags"
 out="$(pi "$P8")"; rc=$?
-ok=1; for pat in '^keos monitoring$' '^kubectl -n keos-metrics get cm \$CM' 'patch --patch-file|--patch-file /dev/stdin' '^keos backup velero$' '^kubectl -n keos-backup get bsl aws' '^keos backup schedule vault idp$' '^keos central-logging$' "^sed -i '/\^    falco:/" '^kubectl -n keos-ops patch keos keos --type merge' '^keos falco$'; do grep -Eq -- "$pat" <<<"$out" || { ok=0; echo "      falta: $pat"; }; done
+ok=1; for pat in '^keos monitoring$' '^kubectl -n keos-metrics get cm \$CM' 'patch --patch-file|--patch-file /dev/stdin' '^keos backup velero$' '^kubectl -n keos-backup get bsl aws' '^keos backup schedule vault idp$' '^keos central-logging$' "^sed -i '/\^ \*falco:/" '^kubectl -n keos-ops patch keos keos --type merge' '^keos falco$'; do grep -Eq -- "$pat" <<<"$out" || { ok=0; echo "      falta: $pat"; }; done
 [[ $rc -eq 0 && $ok -eq 1 ]] && pass "(e) render-postinstall con todos los flags: imprime los comandos esperados" || fail "(e) postinstall con flags"
+# (e-bis) el parche PLT-5162 es lo ÚLTIMO (después de keos falco) y fuerza la reconciliación de Flux
+last="$(grep -nE '^keos falco$' <<<"$out" | tail -1 | cut -d: -f1)"; pgl="$(grep -nE '^CM=00-pushgateway' <<<"$out" | head -1 | cut -d: -f1)"
+[[ -n "$last" && -n "$pgl" && "$pgl" -gt "$last" ]] && grep -q 'annotate hr pushgateway reconcile.fluxcd.io/requestedAt' <<<"$out" && pass "(e) PLT-5162: el parche va el último y fuerza la reconciliación (annotate)" || fail "(e) orden del parche PLT-5162"
+# init-cluster.sh: bucket de backups activado por defecto en clústeres nuevos, y desactivable
+grep -q '^export ENABLE_BACKUPS_BUCKET=true' "$D/cluster.env" && pass "init-cluster.sh: ENABLE_BACKUPS_BUCKET=true por defecto" || fail "init sin bucket de backups"
+"$S/init-cluster.sh" --account 111111111111 --name demo-y --no-detect --admin-profile igualdad --dir "$T/demo-y" --set ENABLE_BACKUPS_BUCKET=false >/dev/null 2>&1; grep -q '^export ENABLE_BACKUPS_BUCKET=false' "$T/demo-y/cluster.env" && pass "init-cluster.sh: --set ENABLE_BACKUPS_BUCKET=false lo desactiva" || fail "init no respeta ENABLE_BACKUPS_BUCKET=false"
 ord="$(grep -nE '^(keos monitoring|keos backup velero|keos backup schedule vault idp|keos central-logging|keos falco)$' <<<"$out" | cut -d: -f2 | tr '\n' ',')"
 [[ "$ord" == "keos monitoring,keos backup velero,keos backup schedule vault idp,keos central-logging,keos falco," ]] && pass "(e) orden: monitoring, velero, schedule, central-logging, falco" || fail "(e) orden: $ord"
 ! grep -qiE 'password|secret|token|AKIA|access_key|LLM' <<<"$out" && ! grep -qiE 'password|secret|token|AKIA|access_key|LLM' <<<"$(pi "$P3")" && pass "(e) la salida no contiene palabras de secretos" || fail "(e) la salida menciona secretos"

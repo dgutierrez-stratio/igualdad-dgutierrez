@@ -119,6 +119,9 @@ fi
 
 # --- overrides explícitos ---
 for kv in "${SETS[@]:-}"; do [[ -n "$kv" ]] || continue; [[ "$kv" == *=* ]] || die "--set espera CLAVE=VALOR"; set_env_var "$ENVF" "${kv%%=*}" "${kv#*=}"; done
+# Bucket de backups de la plataforma (GitOps): activado por defecto en clústeres NUEVOS para que ya exista cuando se migre system-services
+# (si no, `flux keos` falla con "The GitOps backups bucket does not exist"). Se puede desactivar con --set ENABLE_BACKUPS_BUCKET=false.
+case " ${SETS[*]:-} " in *" ENABLE_BACKUPS_BUCKET="*) ;; *) set_env_var "$ENVF" ENABLE_BACKUPS_BUCKET true ;; esac
 
 # --- resumen (valores ya derivados) ---
 ( set +u; source "$ENVF"

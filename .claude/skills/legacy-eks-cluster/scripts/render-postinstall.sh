@@ -9,7 +9,7 @@
 # backup velero (+ bsl), backup schedule, central-logging, falco. Si no hay ningún flag activo imprime un AVISO con las opciones.
 # Entradas opcionales de solo lectura: <dir>/override_vars/<cluster>.yaml (prometheus_pushgateway_enabled),
 # <dir>/override_charts_values/keos-backup-velero.yaml (avisa si falta con ENABLE_BACKUP_VELERO=true) y
-# <dir>/keos.yaml (con ENABLE_FALCO=true avisa si no lleva el bloque keos.security.falco: hay que re-renderizarlo antes de `keos install`).
+# <dir>/keos.yaml (tras `keos install` la sangría cambia a 8 espacios: el sed y el aviso usan `^ *falco:`; con ENABLE_FALCO=true avisa si no lleva el bloque keos.security.falco: hay que re-renderizarlo antes de `keos install`).
 # Los flags se leen solo de cluster.env: el entorno heredado de la shell se ignora.
 set -euo pipefail
 # shellcheck disable=SC1091
@@ -63,27 +63,6 @@ if [[ "$MON" == true ]]; then
 # --- keos monitoring: Prometheus, Alertmanager, Grafana y Thanos query + exporters activados en override_vars ---
 keos monitoring
 EOF
-  if [[ "$PG" == true ]]; then
-    cat <<'EOF'
-
-# Parche PLT-5162: tras `keos monitoring` la HelmRelease pushgateway de keos-metrics queda con "ValuesError ... yaml: line 119"
-# (liveness/readiness con dos espacios de más en el ConfigMap; un override no lo evita). Se corrige el ConfigMap y el helm-controller
-# reintenta solo. SE PIERDE si se vuelve a lanzar `keos monitoring`: repetir este parche.
-CM=00-pushgateway-helm-chart-default-values
-kubectl -n keos-metrics get cm $CM -o jsonpath='{.data.values\.yaml}' \
-  | sed -E '/^(liveness|readiness):/,/^$/ s/^    /  /' \
-  | jq -Rs '{data: {"values.yaml": .}}' \
-  | kubectl -n keos-metrics patch cm $CM --type merge --patch-file /dev/stdin
-kubectl -n keos-metrics get hr pushgateway   # Ready True
-EOF
-  else
-    echo
-    if [[ "$PG" == fixed ]]; then
-      echo "# (parche PLT-5162 omitido: keos-installer $KV >= 1.4.9 ya lo corrige; aplicarlo con sed corrompería el ConfigMap)"
-    else
-      echo "# (parche PLT-5162 omitido: prometheus_pushgateway_enabled no está activo en $OVF)"
-    fi
-  fi
 fi
 
 if [[ "$VEL" == true ]]; then
@@ -116,7 +95,7 @@ EOF
 fi
 
 if [[ "$FAL" == true ]]; then
-  if [[ -f "$DIR/keos.yaml" ]] && ! grep -q '^    falco:' "$DIR/keos.yaml"; then echo "
+  if [[ -f "$DIR/keos.yaml" ]] && ! grep -q '^ *falco:' "$DIR/keos.yaml"; then echo "
 # AVISO: $DIR/keos.yaml NO contiene el bloque keos.security.falco: re-renderiza keos.yaml con ENABLE_FALCO=true (render-keos.sh) ANTES de \`keos install\`;
 # si no, el sed de activación de más abajo no hará nada y \`keos falco\` fallará"; fi
   [[ "$LOG" == true ]] || echo "
@@ -125,9 +104,37 @@ if [[ "$FAL" == true ]]; then
 
 # --- Falco con salida a OpenSearch. keos.yaml se instaló con falco.enabled: false (el precheck de `keos install` falla con true);
 # `keos falco` exige true en keos.yaml Y que coincida con el CR keos de keos-ops, así que se cambia en los dos sitios ---
-sed -i '/^    falco:/,/enabled:/ s/enabled: false.*/enabled: true/' /workspace/keos.yaml
+sed -i '/^ *falco:/,/enabled:/ s/enabled: false.*/enabled: true/' /workspace/keos.yaml
 kubectl -n keos-ops patch keos keos --type merge -p '{"spec":{"keos":{"security":{"falco":{"enabled":true}}}}}'
 keos falco
 EOF
+fi
+if [[ "$MON" == true ]]; then
+  echo
+  echo "# --- Parche PLT-5162 del pushgateway: SIEMPRE EL ÚLTIMO comando de 13b. Cualquier \`keos ...\` posterior (monitoring, velero, central-logging, falco) regenera"
+  echo "# el ConfigMap de monitorización y pisa el parche (el último escritor del ConfigMap es el cliente de keos). No repitas \`keos monitoring\` después. ---"
+  if [[ "$PG" == true ]]; then
+    cat <<'EOF'
+
+# Parche PLT-5162: tras `keos monitoring` la HelmRelease pushgateway de keos-metrics queda con "ValuesError ... yaml: line 119"
+# (liveness/readiness con dos espacios de más en el ConfigMap; un override no lo evita). Se corrige el ConfigMap y el helm-controller
+# reintenta (se fuerza con el annotate: Flux entra en backoff y no reintenta solo a tiempo). SE PIERDE si se vuelve a lanzar `keos monitoring`.
+CM=00-pushgateway-helm-chart-default-values
+kubectl -n keos-metrics get cm $CM -o jsonpath='{.data.values\.yaml}' \
+  | sed -E '/^(liveness|readiness):/,/^$/ s/^    /  /' \
+  | jq -Rs '{data: {"values.yaml": .}}' \
+  | kubectl -n keos-metrics patch cm $CM --type merge --patch-file /dev/stdin \
+&& kubectl -n keos-metrics annotate hr pushgateway reconcile.fluxcd.io/requestedAt="$(date +%s)" --overwrite
+sleep 40
+kubectl -n keos-metrics get hr pushgateway   # Ready True; si sigue en ValuesError, el ConfigMap se regeneró: repite SOLO este bloque
+EOF
+  else
+    echo
+    if [[ "$PG" == fixed ]]; then
+      echo "# (parche PLT-5162 omitido: keos-installer $KV >= 1.4.9 ya lo corrige; aplicarlo con sed corrompería el ConfigMap)"
+    else
+      echo "# (parche PLT-5162 omitido: prometheus_pushgateway_enabled no está activo en $OVF)"
+    fi
+  fi
 fi
 exit 0
